@@ -1,0 +1,109 @@
+/**
+ * Database tests against the Firestore emulator (npm run test:db). Skipped without it.
+ * These prove the transaction rules: no overselling under simultaneous clicks, no double-booking,
+ * and the pay run marks exactly what Sam approved.
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+const enabled = !!process.env.FIRESTORE_EMULATOR_HOST;
+
+test("database rules", { skip: !enabled && "set FIRESTORE_EMULATOR_HOST to run" }, async (t) => {
+  const store = await import("./store");
+  const { db } = await import("./firestore");
+  const { londonToUtc } = await import("./time");
+  for (const col of ["ot_slots", "ot_claims", "ot_pay_runs", "ot_audit", "ot_meta"]) {
+    const snap = await db().collection(col).get();
+    await Promise.all(snap.docs.map((d) => d.ref.delete()));
+  }
+  const now = londonToUtc("2026-11-05", "15:00");
+  const louis = { userId: "ULOUIS", email: "louis@fomorentals.co.uk", name: "Louis", admin: false };
+  const people = ["U1", "U2", "U3", "U4", "U5"].map((id) => ({ userId: id, email: `${id}@x`, name: id, admin: false }));
+  const sam = { userId: "USAM", email: "sam@fomorentals.co.uk", name: "Sam", admin: true };
+  const base = { kind: "Early opening", title: "Test", rentmanJob: "", details: "", date: "2026-11-10", startTime: "07:00", endTime: "07:30", feePence: 2500, spaces: 1, leaveEarlyAt: null };
+
+  await t.test("five simultaneous claims on a one-space slot: exactly one wins", async () => {
+    const slot = await store.createSlot(base, louis, now);
+    const results = await Promise.all(people.map((p) => store.claimSlot(slot.id, p, "paid", now)));
+    assert.equal(results.filter((r) => r.ok).length, 1);
+    assert.ok(results.filter((r) => !r.ok).every((r) => !r.ok && r.reason === "full"));
+    const fresh = await store.getSlot(slot.id);
+    assert.equal(fresh?.claimedCount, 1);
+    assert.equal(fresh?.status, "full");
+  });
+
+  await t.test("overlapping overtime is blocked; withdraw frees the space", async () => {
+    const a = await store.createSlot({ ...base, date: "2026-11-11" }, louis, now);
+    const b = await store.createSlot({ ...base, date: "2026-11-11", startTime: "07:15", endTime: "08:00", spaces: 2 }, louis, now);
+    assert.equal((await store.claimSlot(a.id, people[0], "paid", now)).ok, true);
+    const clash = await store.claimSlot(b.id, people[0], "paid", now);
+    assert.equal(!clash.ok && clash.reason, "clash");
+    const w = await store.withdrawClaim(a.id, people[0], now);
+    assert.equal(w.slot.status, "open");
+    assert.equal((await store.getSlot(a.id))?.claimedCount, 0);
+    assert.equal((await store.claimSlot(b.id, people[0], "paid", now)).ok, true);
+    // Re-claim after withdrawing works too.
+    assert.equal((await store.claimSlot(a.id, people[1], "paid", now)).ok, true);
+  });
+
+  await t.test("early finish claims pay £0", async () => {
+    const s = await store.createSlot({ ...base, date: "2026-11-12", startTime: "06:00", endTime: "06:30", leaveEarlyAt: "15:00" }, louis, now);
+    const r = await store.claimSlot(s.id, people[2], "early_finish", now);
+    assert.ok(r.ok && r.claim.amountPence === 0 && r.claim.route === "early_finish");
+  });
+
+  await t.test("only the poster or an admin can edit; spaces can't drop below claims", async () => {
+    const s = await store.createSlot({ ...base, date: "2026-11-13", spaces: 2 }, louis, now);
+    await store.claimSlot(s.id, people[0], "paid", now);
+    await store.claimSlot(s.id, people[1], "paid", now);
+    await assert.rejects(store.editSlot(s.id, { ...base, date: "2026-11-13", spaces: 3 }, people[3], now), /Only the person/);
+    await assert.rejects(store.editSlot(s.id, { ...base, date: "2026-11-13", spaces: 1 }, louis, now), /can't go below/);
+    const e = await store.editSlot(s.id, { ...base, date: "2026-11-13", spaces: 2, feePence: 4000 }, sam, now);
+    assert.deepEqual(e.claims.map((c) => c.amountPence), [4000, 4000]);
+  });
+
+  await t.test("cancel removes everyone's claim", async () => {
+    const s = await store.createSlot({ ...base, date: "2026-11-14" }, louis, now);
+    await store.claimSlot(s.id, people[4], "paid", now);
+    const r = await store.cancelSlot(s.id, louis, now);
+    assert.equal(r.claims.length, 1);
+    assert.equal((await store.getClaim(r.claims[0].id))?.status, "cancelled");
+    assert.equal((await store.claimSlot(s.id, people[3], "paid", now)).ok, false);
+  });
+
+  await t.test("pay run: approve, then sent marks claims paid", async () => {
+    const s = await store.createSlot({ ...base, date: "2026-11-15" }, louis, now);
+    const r = await store.claimSlot(s.id, people[3], "paid", now);
+    assert.ok(r.ok);
+    await store.completeClaim(r.claim);
+    const { payableClaims } = await import("./rules");
+    const payable = payableClaims(await store.unpaidCompletedClaims());
+    assert.deepEqual(payable.map((c) => c.id), [r.claim.id]);
+    const run = await store.createPayRun("2026-11", payable, now);
+    assert.ok(run);
+    assert.equal(await store.createPayRun("2026-11", payable, now), null, "only once");
+    await assert.rejects(store.markPayRunSent("2026-11", sam, now), /hasn't approved/);
+    await store.approvePayRun("2026-11", sam, now);
+    await store.markPayRunSent("2026-11", { ...sam, name: "Jamie" }, now);
+    assert.equal((await store.getClaim(r.claim.id))?.paidRunId, "2026-11");
+    assert.equal((await store.unpaidCompletedClaims()).length, 0);
+    await assert.rejects(store.setClaimFlag(r.claim.id, true, "x", sam), /Already paid/);
+  });
+
+  await t.test("every change is in the audit log", async () => {
+    const snap = await db().collection("ot_audit").get();
+    const actions = new Set(snap.docs.map((d) => d.data().action));
+    for (const a of ["slot.create", "claim.create", "claim.withdraw", "slot.edit", "slot.cancel", "claim.complete", "payrun.create", "payrun.approve", "payrun.sent"])
+      assert.ok(actions.has(a), a);
+  });
+
+  await t.test("scheduler lock is exclusive", async () => {
+    const t1 = await store.acquireLock("x", 60_000);
+    assert.ok(t1);
+    assert.equal(await store.acquireLock("x", 60_000), null);
+    await store.releaseLock("x", "wrong-token");
+    assert.equal(await store.acquireLock("x", 60_000), null);
+    await store.releaseLock("x", t1!);
+    assert.ok(await store.acquireLock("x", 60_000));
+  });
+});
