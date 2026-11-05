@@ -25,10 +25,17 @@ export class SlackError extends Error {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function slack<T = any>(method: string, body: Record<string, unknown>): Promise<T> {
+  // Form-encoded, because some read methods (users.info, users.lookupByEmail, chat.getPermalink)
+  // ignore JSON bodies. Objects such as blocks and views go in as JSON strings, which Slack accepts.
+  const form = new URLSearchParams();
+  for (const [k, v] of Object.entries(body)) {
+    if (v === undefined || v === null) continue;
+    form.set(k, typeof v === "string" ? v : JSON.stringify(v));
+  }
   const res = await fetch(`${API}/${method}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json; charset=utf-8", Authorization: `Bearer ${token()}` },
-    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Bearer ${token()}` },
+    body: form,
   });
   if (!res.ok) throw new SlackError(method, `HTTP ${res.status}`);
   const json = (await res.json()) as { ok: boolean; error?: string };
