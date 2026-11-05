@@ -54,9 +54,17 @@ const actorCache = new Map<string, { actor: Actor | null; at: number }>();
 export async function actorFor(userId: string): Promise<Actor | null> {
   const hit = actorCache.get(userId);
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.actor;
-  const res = await slack<{ user: { profile: { email?: string; display_name?: string; real_name?: string } } }>("users.info", {
-    user: userId,
-  });
+  let res: { user: { profile: { email?: string; display_name?: string; real_name?: string } } };
+  try {
+    res = await slack("users.info", { user: userId });
+  } catch (err) {
+    if (err instanceof SlackError && err.code === "user_not_found") {
+      // Usually means SLACK_BOT_TOKEN belongs to a different app or workspace. Say which.
+      const who = await slack<{ team: string; team_id: string; user: string; bot_id?: string }>("auth.test", {}).catch(() => null);
+      throw new SlackError("users.info", `user_not_found (user ${userId}; token is for team ${who?.team_id ?? "?"} ${who?.team ?? ""}, bot ${who?.user ?? "?"})`);
+    }
+    throw err;
+  }
   const staff = staffByEmail(res.user.profile.email);
   const actor = staff ? { userId, email: staff.email, name: staff.name, admin: staff.admin } : null;
   actorCache.set(userId, { actor, at: Date.now() });
