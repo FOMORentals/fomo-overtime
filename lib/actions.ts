@@ -3,6 +3,7 @@
  * The database change itself has already succeeded by the time these run. Each side effect
  * is tried separately; a failure is reported to Sentry and recorded on the claim, never swallowed.
  */
+import { adminLink } from "./admin-link";
 import { deleteEvent, isBusy, upsertEvent } from "./calendar";
 import { appUrl, report } from "./report";
 import { calendarWindow } from "./rules";
@@ -129,5 +130,11 @@ export async function publishHome(userId: string, actor?: Actor | null) {
   }
   const now = Date.now();
   const [mine, open] = await Promise.all([claimsForUser(userId), liveSlots(now)]);
-  await slack("views.publish", { user_id: userId, view: homeView({ name: who.name, admin: who.admin, appUrl: appUrl(), mine, openSlots: open, now }) });
+  const adminUrl = who.admin ? adminLink(appUrl(), who.email) : null;
+  await slack("views.publish", { user_id: userId, view: homeView({ name: who.name, adminUrl, mine, openSlots: open, now }) });
+}
+
+/** Signed admin/CSV links for whoever gets a pay-run message. */
+export function payRunLinks(email: string, runId: string) {
+  return { admin: adminLink(appUrl(), email), csv: adminLink(appUrl(), email, `/api/export?run=${runId}`) };
 }

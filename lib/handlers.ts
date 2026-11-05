@@ -1,7 +1,7 @@
 /** Slack interaction handling: buttons, forms and the /overtime command. */
 import { after } from "next/server";
-import { afterCancel, afterClaim, afterEdit, afterWithdraw, postSlotToChannel, publishHome } from "./actions";
-import { appUrl, report } from "./report";
+import { afterCancel, afterClaim, afterEdit, afterWithdraw, payRunLinks, postSlotToChannel, publishHome } from "./actions";
+import { report } from "./report";
 import { isLateWithdrawal, money, parseFee, type ClaimRefusal } from "./rules";
 import { actorFor, dm, dmEmail, slack } from "./slack";
 import { APPROVER_EMAIL, PAYROLL_SENDER_EMAIL } from "./staff";
@@ -146,7 +146,7 @@ async function handleBlockAction(p: Payload) {
                 },
               ],
             });
-            const forJamie = payRunBlocks(run, claims, appUrl(), "jamie");
+            const forJamie = payRunBlocks(run, claims, payRunLinks(PAYROLL_SENDER_EMAIL, run.id), "jamie");
             await dmEmail(PAYROLL_SENDER_EMAIL, forJamie.text, forJamie.blocks);
           } catch (e) {
             if (e instanceof UserError) await tell(p, e.message);
@@ -164,7 +164,7 @@ async function handleBlockAction(p: Payload) {
           try {
             const run = await markPayRunSent(action.value, actor);
             const claims = await claimsByIds(run.claimIds);
-            await slack("chat.update", { channel: p.channel.id, ts: p.message.ts, ...payRunBlocks(run, claims, appUrl(), "done") });
+            await slack("chat.update", { channel: p.channel.id, ts: p.message.ts, ...payRunBlocks(run, claims, payRunLinks(actor.email, run.id), "done") });
             await dmEmail(APPROVER_EMAIL, `:white_check_mark: ${actor.name} has sent ${monthLabel(run.id)} overtime (${money(run.totalPence)}) to payroll. All marked paid.`);
           } catch (e) {
             if (e instanceof UserError) await tell(p, e.message);

@@ -3,8 +3,8 @@
  * Calls no Rentman, HubSpot or Xero APIs: only Firestore, Slack and Google Calendar.
  * Each nudge fires once: its timestamp is stored after sending, so re-runs are safe.
  */
-import { repostSlot, refreshSlotMessage, permalink } from "./actions";
-import { appUrl, report } from "./report";
+import { payRunLinks, permalink, refreshSlotMessage, repostSlot } from "./actions";
+import { report } from "./report";
 import { claimsToComplete, dueNudges, payRunDue, payableClaims } from "./rules";
 import { dm, dmEmail } from "./slack";
 import { APPROVER_EMAIL, OPS_ALERT_EMAIL } from "./staff";
@@ -96,7 +96,7 @@ export async function runTick(deadline: number, now = Date.now()): Promise<TickR
       const payable = payableClaims(await unpaidCompletedClaims());
       const run = await createPayRun(runId, payable, now);
       if (!run) return;
-      const msg = payRunBlocks(run, payable, appUrl(), "sam");
+      const msg = payRunBlocks(run, payable, payRunLinks(APPROVER_EMAIL, run.id), "sam");
       await dmEmail(APPROVER_EMAIL, msg.text, msg.blocks);
       out.payRun = runId;
     }, { runId });

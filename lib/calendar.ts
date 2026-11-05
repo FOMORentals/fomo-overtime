@@ -13,8 +13,8 @@ const SCOPES = ["https://www.googleapis.com/auth/calendar.events", "https://www.
 const BASE = "https://www.googleapis.com/calendar/v3";
 
 function credentials(): { client_email: string; private_key: string } {
-  const raw = process.env.GOOGLE_CALENDAR_SA_BASE64;
-  if (!raw) throw new Error("GOOGLE_CALENDAR_SA_BASE64 is not set");
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_BASE64;
+  if (!raw) throw new Error("GOOGLE_SERVICE_ACCOUNT_BASE64 is not set");
   return JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
 }
 

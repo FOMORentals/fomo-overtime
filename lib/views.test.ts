@@ -67,11 +67,11 @@ test("route modal offers both routes", () => {
 });
 
 test("home view and pay run render", () => {
-  const home = homeView({ name: "Rosie", admin: false, appUrl: "https://x", mine: [claim], openSlots: [s], now: londonToUtc("2026-11-05", "12:00") });
+  const home = homeView({ name: "Rosie", adminUrl: null, mine: [claim], openSlots: [s], now: londonToUtc("2026-11-05", "12:00") });
   assert.equal(home.type, "home");
   assert.ok(home.blocks.length < 100);
   const run = { id: "2026-11", createdAt: 0, status: "awaiting_sam" as const, claimIds: ["a"], totalPence: 2500, approvedBy: null, approvedAt: null, sentBy: null, sentAt: null };
-  const pr = payRunBlocks(run, [{ ...claim, route: "paid", amountPence: 2500, status: "completed" }], "https://x", "sam");
+  const pr = payRunBlocks(run, [{ ...claim, route: "paid", amountPence: 2500, status: "completed" }], { admin: "https://x/a", csv: "https://x/c" }, "sam");
   assert.match(JSON.stringify(pr.blocks), /payrun_approve/);
   assert.match(pr.text, /£25 total/);
 });

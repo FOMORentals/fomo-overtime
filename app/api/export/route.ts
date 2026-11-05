@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { adminEmail } from "@/lib/admin-session";
 import { payRunCsv } from "@/lib/rules";
-import { isAdminEmail } from "@/lib/staff";
 import { claimsByIds, claimsInMonth, getPayRun } from "@/lib/store";
 
 /** CSV for payroll. ?run=YYYY-MM (a pay run) or ?month=YYYY-MM (every counted claim that month). Admins only. */
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!isAdminEmail(session?.user?.email)) return new NextResponse("Admins only. Sign in at /admin first.", { status: 403 });
+  if (!(await adminEmail())) return new NextResponse("Admins only. Open this from the Overtime app in Slack.", { status: 403 });
   const url = new URL(req.url);
   const run = url.searchParams.get("run");
   const month = url.searchParams.get("month");

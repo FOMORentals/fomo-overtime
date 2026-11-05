@@ -1,9 +1,8 @@
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { auth } from "@/auth";
+import { adminEmail } from "@/lib/admin-session";
 import { COL, db } from "@/lib/firestore";
 import { money, pairedSlotWarnings, totalsByPerson } from "@/lib/rules";
-import { isAdminEmail, staffByEmail } from "@/lib/staff";
+import { staffByEmail } from "@/lib/staff";
 import { claimsInMonth, getPayRun, liveSlots, setClaimFlag, type Actor } from "@/lib/store";
 import { finalFriday, londonParts, monthLabel, prettyDate } from "@/lib/time";
 import type { Claim } from "@/lib/types";
@@ -11,9 +10,7 @@ import type { Claim } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 async function adminActor(): Promise<Actor> {
-  const session = await auth();
-  const email = session?.user?.email;
-  const staff = staffByEmail(email);
+  const staff = staffByEmail(await adminEmail());
   if (!staff?.admin) throw new Error("Admins only");
   return { userId: `web:${staff.email}`, email: staff.email, name: staff.name, admin: true };
 }
@@ -53,13 +50,15 @@ function state(c: Claim, now: number) {
 }
 
 export default async function Admin({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
-  const session = await auth();
-  if (!session?.user?.email) redirect("/signin");
-  if (!isAdminEmail(session.user.email))
+  const email = await adminEmail();
+  if (!email)
     return (
       <main>
-        <h1>Admins only</h1>
-        <p className="muted">Signed in as {session.user.email}. Use the overtime app in Slack instead.</p>
+        <h1>FOMO Overtime</h1>
+        <p className="muted">
+          This page is for Sam and Jamie. Open it from the <b>Admin page</b> button on the Overtime app&apos;s Home tab in Slack
+          (links last 12 hours).
+        </p>
       </main>
     );
 
@@ -181,7 +180,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
           </tbody>
         </table>
       </div>
-      <p className="muted">Signed in as {session.user.email}. Flagging leaves a slot out of pay; every change is logged.</p>
+      <p className="muted">Signed in as {email}. Flagging leaves a slot out of pay; every change is logged.</p>
     </main>
   );
 }

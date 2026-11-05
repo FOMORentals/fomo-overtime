@@ -169,8 +169,8 @@ function claimLine(c: Claim, showPay = true) {
 
 export function homeView(opts: {
   name: string;
-  admin: boolean;
-  appUrl: string;
+  /** Signed admin-page link, only for admins. */
+  adminUrl: string | null;
   mine: Claim[];
   openSlots: Slot[];
   now: number;
@@ -188,7 +188,7 @@ export function homeView(opts: {
       type: "actions",
       elements: [
         { type: "button", style: "primary", text: { type: "plain_text", text: "Post overtime" }, action_id: "open_post" },
-        ...(opts.admin ? [{ type: "button", text: { type: "plain_text", text: "Admin page" }, url: `${opts.appUrl}/admin`, action_id: "admin_link" }] : []),
+        ...(opts.adminUrl ? [{ type: "button", text: { type: "plain_text", text: "Admin page" }, url: opts.adminUrl, action_id: "admin_link" }] : []),
       ],
     },
     { type: "divider" },
@@ -218,7 +218,13 @@ export function homeView(opts: {
   return { type: "home", blocks: blocks.slice(0, 100) };
 }
 
-export function payRunBlocks(run: PayRun, claims: Claim[], appUrl: string, forWho: "sam" | "jamie" | "done"): { text: string; blocks: Block[] } {
+/** links: signed admin-page and CSV links for the person receiving the message (lib/admin-link.ts). */
+export function payRunBlocks(
+  run: PayRun,
+  claims: Claim[],
+  links: { admin: string; csv: string },
+  forWho: "sam" | "jamie" | "done",
+): { text: string; blocks: Block[] } {
   const totals = totalsByPerson(claims);
   const warnings = pairedSlotWarnings(claims);
   const lines = totals.map((t) => `*${t.name}: ${money(t.totalPence)}*\n${t.claims.map((c) => `   ${prettyDate(c.date)} · ${esc(c.slotLabel)} · ${money(c.amountPence)}`).join("\n")}`);
@@ -238,9 +244,9 @@ export function payRunBlocks(run: PayRun, claims: Claim[], appUrl: string, forWh
       },
     });
   }
-  const csvUrl = `${appUrl}/api/export?run=${run.id}`;
+  const csvUrl = links.csv;
   if (forWho === "sam") {
-    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Covers all finished, unpaid overtime up to now. Fix anything on the <${appUrl}/admin|admin page> first (flag a slot to leave it out), then approve.` }] });
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Covers all finished, unpaid overtime up to now. Fix anything on the <${links.admin}|admin page> first (flag a slot to leave it out), then approve.` }] });
     blocks.push({ type: "actions", elements: [{ type: "button", style: "primary", text: { type: "plain_text", text: "Approve and send to Jamie" }, action_id: "payrun_approve", value: run.id }] });
   } else if (forWho === "jamie") {
     blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Approved by ${run.approvedBy}. <${csvUrl}|Download CSV> for Mark's team. Press the button once you've sent it, and everything here is marked paid.` }] });
