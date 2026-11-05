@@ -4,7 +4,10 @@ Already done: Slack app installed and its two secrets added; `APP_URL`, `SLACK_O
 
 What's left is one Google service account that does two jobs: it stores the overtime data (in the same Firestore as the team dashboard) and writes calendar events. About 10 minutes. Never paste a key into Slack or a chat.
 
-## 1. Make the service account (Google Cloud, project fomo-bookings-board-v2)
+## 1. Make the service account
+
+As built (5 Nov 2026): `overtime-app@clever-acolyte-298614.iam.gserviceaccount.com`, made in the clever-acolyte project, with **Cloud Datastore User** granted on fomo-bookings-board-v2 and the Calendar API enabled in clever-acolyte-298614. The steps below are for recreating it.
+
 1. Open https://console.cloud.google.com/apis/library/calendar-json.googleapis.com?project=fomo-bookings-board-v2 and press **Enable** (skip if it says Manage).
 2. Open https://console.cloud.google.com/iam-admin/serviceaccounts/create?project=fomo-bookings-board-v2
    - Name: `overtime-app` → **Create and continue**
