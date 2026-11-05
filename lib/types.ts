@@ -4,7 +4,7 @@ export type SlotStatus = "open" | "full" | "cancelled" | "completed";
 export type Route = "paid" | "early_finish";
 export type ClaimStatus = "confirmed" | "withdrawn" | "cancelled" | "completed";
 
-export const SLOT_KINDS = ["Early opening", "Early collection", "Late closing", "Late return", "Weekend", "Other"] as const;
+export const SLOT_KINDS = ["Early opening", "Early collection", "Late closing", "Late return", "Weekend opening", "Weekend closing", "Other"] as const;
 
 export interface SlotInput {
   kind: string;
