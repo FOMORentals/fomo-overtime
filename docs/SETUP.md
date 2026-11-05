@@ -39,6 +39,8 @@ Vercel → **fomo-overtime** → Settings → Environment Variables (Production)
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | copy from the bookings board project, then add `https://fomo-overtime.vercel.app/api/auth/callback/google` to that OAuth client's redirect URIs (Google Cloud → APIs & Services → Credentials) |
 | `SENTRY_DSN` | copy from the bookings board project |
 
+Already set by Claude: `APP_URL`, `SLACK_OVERTIME_CHANNEL_ID`, `GOOGLE_WORKSPACE_DOMAIN`, `OVERTIME_LOCATION`, `CRON_SECRET`, `AUTH_SECRET`.
+
 Then **Deployments → Redeploy**.
 
 ## 4. Check it works
