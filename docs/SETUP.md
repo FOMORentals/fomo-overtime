@@ -32,5 +32,13 @@ It can add and remove calendar events and see busy/free times. It can't read ema
 
 Optional: `SENTRY_DSN` (Sentry → project → Settings → Client Keys) so errors reach Sentry, as in the other apps.
 
+## 4. Shared "FOMO Overtime" calendar (optional, added 6 Nov)
+1. In Google Calendar as jamie@: left sidebar, **Other calendars +** → **Create new calendar**, name it `FOMO Overtime`, time zone London.
+2. In its settings: **Share with specific people** → add the team with "See all event details" (or share with everyone at fomorentals.co.uk).
+3. Same settings page, **Integrate calendar** → copy the **Calendar ID** (ends `@group.calendar.google.com`).
+4. Give it to Claude (it isn't a secret), or add it in Vercel as `OT_TEAM_CALENDAR_ID`. The next run fills in every upcoming slot.
+
+The app writes it as Jamie (`OT_TEAM_CALENDAR_OWNER`, default jamie@), using the calendar permission already approved.
+
 ## The admin page
 No separate login: Sam and Jamie open it from the **Admin page** button on the Overtime app's Home tab in Slack (the link lasts 12 hours). The month-end messages carry their own links too.

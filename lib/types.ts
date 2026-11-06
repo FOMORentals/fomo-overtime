@@ -33,6 +33,8 @@ export interface Slot extends SlotInput {
   messageTs: string | null;
   repostedAt: number | null;
   unclaimedAlertAt: number | null;
+  /** The slot's updatedAt last written to the shared team calendar (missing on older slots). */
+  teamCalendarSyncedAt?: number | null;
 }
 
 export interface Claim {
@@ -58,6 +60,12 @@ export interface Claim {
   calendarError: string | null;
   reminderDayBeforeAt: number | null;
   reminderHourBeforeAt: number | null;
+  /** Give away: offered to this colleague, waiting for them to accept (missing on older claims). */
+  offerTo?: string | null;
+  offerToName?: string | null;
+  offerAt?: number | null;
+  /** Set on the old claim when someone else took it over. */
+  swappedTo?: string | null;
 }
 
 export interface PayRun {

@@ -41,7 +41,10 @@ export function slotMessage(s: Slot, claims: Claim[], appUrl: string): { text: s
   if (!closed) {
     const elements: Block[] = [];
     if (left > 0) elements.push({ type: "button", style: "primary", text: { type: "plain_text", text: "Claim" }, action_id: "claim", value: s.id });
-    if (active.length) elements.push({ type: "button", text: { type: "plain_text", text: "Withdraw" }, action_id: "withdraw", value: s.id });
+    if (active.length) {
+      elements.push({ type: "button", text: { type: "plain_text", text: "Give away" }, action_id: "give_away", value: s.id });
+      elements.push({ type: "button", text: { type: "plain_text", text: "Withdraw" }, action_id: "withdraw", value: s.id });
+    }
     elements.push({
       type: "overflow",
       action_id: "manage",
@@ -156,8 +159,72 @@ export function claimConfirmation(s: Slot, c: Claim, calendarBusy: boolean): str
   else if (c.amountPence > 0) parts.push(`${money(c.amountPence)} will be added to your overtime for ${monthLabel(s.date.slice(0, 7))}.`);
   parts.push("It's in your Google Calendar, and I'll remind you at 5pm the day before.");
   if (calendarBusy) parts.push(":warning: Heads up: your calendar already has something else at that time.");
-  parts.push("Can't make it? Press *Withdraw* on the post. Up to 48 hours before is fine; after that Sam gets told.");
+  parts.push("Can't make it? Press *Give away* on the post to hand it to a colleague, or *Withdraw*. Withdrawing up to 48 hours before is fine; after that Sam gets told.");
   return parts.join("\n");
+}
+
+/** Give away: pick the colleague. */
+export function giveModal(s: Slot): Block {
+  return {
+    type: "modal",
+    callback_id: "give_form",
+    private_metadata: s.id,
+    title: { type: "plain_text", text: "Give away" },
+    submit: { type: "plain_text", text: "Offer it" },
+    close: { type: "plain_text", text: "Back" },
+    blocks: [
+      { type: "section", text: { type: "mrkdwn", text: `*${slotLine(s)}*` } },
+      {
+        type: "input",
+        block_id: "to",
+        label: { type: "plain_text", text: "Who are you giving it to?" },
+        element: { type: "users_select", action_id: "v", placeholder: { type: "plain_text", text: "Pick a colleague" } },
+        hint: { type: "plain_text", text: "They get a message to accept. You stay on it until they do." },
+      },
+    ],
+  };
+}
+
+/** The DM a colleague gets when someone offers them a slot. */
+export function offerMessage(s: Slot, from: Pick<Claim, "userId" | "name" | "route">): { text: string; blocks: Block[] } {
+  const value = `${s.id}|${from.userId}`;
+  const leave = from.route === "early_finish" ? ` They chose the leave-early option (work through, leave at ${s.leaveEarlyAt}, no extra pay), and you'd do the same.` : "";
+  const text = `${from.name} would like to give you *${slotLine(s)}*.${leave}`;
+  return {
+    text: text.replace(/\*/g, ""),
+    blocks: [
+      { type: "section", text: { type: "mrkdwn", text } },
+      {
+        type: "actions",
+        elements: [
+          { type: "button", style: "primary", text: { type: "plain_text", text: "Take it" }, action_id: "swap_accept", value },
+          { type: "button", text: { type: "plain_text", text: "No thanks" }, action_id: "swap_decline", value },
+        ],
+      },
+    ],
+  };
+}
+
+/** Monday round-up for #rentals_overtime: every slot this week and who's on it. */
+export function roundupMessage(week: Slot[], claims: Claim[]): { text: string; blocks: Block[] } {
+  if (!week.length) {
+    const text = ":calendar: *Overtime this week:* nothing posted yet. Use `/overtime` to post a slot.";
+    return { text, blocks: [{ type: "section", text: { type: "mrkdwn", text } }] };
+  }
+  let open = 0;
+  const lines = week.map((s) => {
+    const on = claims.filter((c) => c.slotId === s.id && (c.status === "confirmed" || c.status === "completed"));
+    const left = Math.max(0, s.spaces - on.length);
+    open += left;
+    const who = on.map((c) => c.name).join(", ");
+    const state = left > 0 ? `*OPEN${s.spaces > 1 ? ` (${left} of ${s.spaces})` : ""}*${who ? ` · ${who}` : ""}` : who;
+    return `• ${slotLine(s)} · ${state}`;
+  });
+  const footer = open
+    ? `:raising_hand: ${open} ${open === 1 ? "space is" : "spaces are"} still open. Press *Claim* on the post or on the Overtime app's Home tab.`
+    : ":white_check_mark: Everything's covered.";
+  const text = `:calendar: *Overtime this week*\n${lines.join("\n")}\n\n${footer}`;
+  return { text: text.slice(0, 3000), blocks: [{ type: "section", text: { type: "mrkdwn", text: text.slice(0, 2990) } }] };
 }
 
 function claimLine(c: Claim, showPay = true) {

@@ -90,10 +90,39 @@ test("database rules", { skip: !enabled && "set FIRESTORE_EMULATOR_HOST to run" 
     await assert.rejects(store.setClaimFlag(r.claim.id, true, "x", sam), /Already paid/);
   });
 
+  await t.test("give away: offer, decline, offer again, accept swaps the claim without changing spaces", async () => {
+    const s = await store.createSlot({ ...base, date: "2026-11-16" }, louis, now);
+    await store.claimSlot(s.id, people[0], "paid", now);
+    await assert.rejects(store.offerClaim(s.id, people[1], people[2], now), /haven't claimed/);
+    await store.offerClaim(s.id, people[0], people[1], now);
+    await assert.rejects(store.acceptOffer(s.id, people[0].userId, people[2], now), /no longer open/);
+    await store.declineOffer(s.id, people[0].userId, people[1]);
+    await assert.rejects(store.acceptOffer(s.id, people[0].userId, people[1], now), /no longer open/);
+    await store.offerClaim(s.id, people[0], people[1], now);
+    const r = await store.acceptOffer(s.id, people[0].userId, people[1], now);
+    assert.equal(r.claim.userId, people[1].userId);
+    assert.equal((await store.getClaim(r.oldClaim.id))?.status, "withdrawn");
+    assert.equal((await store.getClaim(r.oldClaim.id))?.swappedTo, people[1].userId);
+    const fresh = await store.getSlot(s.id);
+    assert.equal(fresh?.claimedCount, 1);
+    assert.equal(fresh?.status, "full");
+    await assert.rejects(store.acceptOffer(s.id, people[0].userId, people[1], now), /no longer open/);
+  });
+
+  await t.test("give away: the taker's clash is checked on accept", async () => {
+    const a = await store.createSlot({ ...base, date: "2026-11-17" }, louis, now);
+    const b = await store.createSlot({ ...base, date: "2026-11-17", startTime: "07:15", endTime: "07:45" }, louis, now);
+    await store.claimSlot(a.id, people[2], "paid", now);
+    await store.claimSlot(b.id, people[3], "paid", now);
+    await store.offerClaim(a.id, people[2], people[3], now);
+    await assert.rejects(store.acceptOffer(a.id, people[2].userId, people[3], now), /already have overtime/);
+    assert.equal((await store.getClaim(`${a.id}_${people[2].userId}`))?.status, "confirmed");
+  });
+
   await t.test("every change is in the audit log", async () => {
     const snap = await db().collection("ot_audit").get();
     const actions = new Set(snap.docs.map((d) => d.data().action));
-    for (const a of ["slot.create", "claim.create", "claim.withdraw", "slot.edit", "slot.cancel", "claim.complete", "payrun.create", "payrun.approve", "payrun.sent"])
+    for (const a of ["slot.create", "claim.create", "claim.withdraw", "slot.edit", "slot.cancel", "claim.complete", "payrun.create", "payrun.approve", "payrun.sent", "claim.offer", "claim.offer_decline", "claim.swap"])
       assert.ok(actions.has(a), a);
   });
 

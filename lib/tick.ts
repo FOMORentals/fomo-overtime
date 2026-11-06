@@ -3,17 +3,18 @@
  * Calls no Rentman, HubSpot or Xero APIs: only Firestore, Slack and Google Calendar.
  * Each nudge fires once: its timestamp is stored after sending, so re-runs are safe.
  */
-import { payRunLinks, permalink, refreshSlotMessage, repostSlot } from "./actions";
+import { payRunLinks, permalink, refreshSlot, repostSlot, syncTeamCalendar } from "./actions";
+import { teamCalendarId } from "./calendar";
 import { report } from "./report";
-import { claimsToComplete, dueNudges, payRunDue, payableClaims } from "./rules";
-import { dm, dmEmail } from "./slack";
+import { claimsToComplete, dueNudges, payRunDue, payableClaims, roundupDue, slotsInWeek } from "./rules";
+import { dm, dmEmail, overtimeChannel, slack } from "./slack";
 import { APPROVER_EMAIL, OPS_ALERT_EMAIL } from "./staff";
 import {
-  completeClaim, completeSlotIfDone, confirmedClaims, createPayRun, getPayRun, liveSlots, setMeta, unpaidCompletedClaims,
+  completeClaim, completeSlotIfDone, confirmedClaims, createPayRun, getMeta, getPayRun, liveSlots, setMeta, unpaidCompletedClaims,
   updateClaimFields, updateSlotFields,
 } from "./store";
 import { summaryDay } from "./time";
-import { payRunBlocks, slotLine } from "./views";
+import { payRunBlocks, roundupMessage, slotLine } from "./views";
 
 export interface TickResult {
   completed: number;
@@ -55,7 +56,7 @@ export async function runTick(deadline: number, now = Date.now()): Promise<TickR
     if (timeUp()) break;
     await attempt("complete_slot", async () => {
       await completeSlotIfDone(s.id, now);
-      await refreshSlotMessage(s.id);
+      await refreshSlot(s.id);
     }, { slotId: s.id });
   }
 
@@ -100,6 +101,27 @@ export async function runTick(deadline: number, now = Date.now()): Promise<TickR
       await dmEmail(APPROVER_EMAIL, msg.text, msg.blocks);
       out.payRun = runId;
     }, { runId });
+  }
+
+  // 4. Monday round-up in the channel, once a week from 8am.
+  const week = roundupDue(now);
+  if (week && !timeUp()) {
+    await attempt("roundup", async () => {
+      const key = `roundup_${week}`;
+      if (await getMeta(key)) return;
+      const msg = roundupMessage(slotsInWeek(slots, week), claims);
+      await slack("chat.postMessage", { channel: overtimeChannel(), ...msg });
+      await setMeta(key, { postedAt: now });
+      out.nudges++;
+    }, { week });
+  }
+
+  // 5. Team calendar catch-up: anything changed since it was last written (also fills it in the first time).
+  if (teamCalendarId()) {
+    for (const s of slots.filter((s) => (s.teamCalendarSyncedAt ?? -1) < s.updatedAt)) {
+      if (timeUp()) break;
+      await attempt("team_calendar", () => syncTeamCalendar(s.id), { slotId: s.id });
+    }
   }
 
   await setMeta("tick", { lastRunAt: now, lastFailures: out.failures, lastIncomplete: out.incomplete, ...(out.failures === 0 ? { lastSuccessAt: now } : {}) });

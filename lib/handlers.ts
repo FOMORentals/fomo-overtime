@@ -1,17 +1,19 @@
 /** Slack interaction handling: buttons, forms and the /overtime command. */
 import { after } from "next/server";
-import { afterCancel, afterClaim, afterEdit, afterWithdraw, payRunLinks, postSlotToChannel, publishHome } from "./actions";
+import {
+  afterCancel, afterClaim, afterEdit, afterSwap, afterWithdraw, payRunLinks, postSlotToChannel, publishHome, syncTeamCalendar,
+} from "./actions";
 import { report } from "./report";
 import { isLateWithdrawal, money, parseFee, type ClaimRefusal } from "./rules";
 import { actorFor, dm, dmEmail, slack } from "./slack";
 import { APPROVER_EMAIL, PAYROLL_SENDER_EMAIL } from "./staff";
 import {
-  approvePayRun, cancelSlot, claimSlot, claimsByIds, claimsForUser, createSlot, editSlot, getSlot, markPayRunSent,
-  UserError, withdrawClaim, type Actor,
+  acceptOffer, approvePayRun, cancelSlot, claimSlot, claimsByIds, claimsForUser, createSlot, declineOffer, editSlot, getClaim, getSlot,
+  markPayRunSent, offerClaim, UserError, withdrawClaim, type Actor,
 } from "./store";
 import { londonParts, monthLabel, prettyDate } from "./time";
 import type { Route, SlotInput } from "./types";
-import { payRunBlocks, readSlotForm, routeModal, slotLine, slotModal } from "./views";
+import { giveModal, offerMessage, payRunBlocks, readSlotForm, routeModal, slotLine, slotModal } from "./views";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Payload = Record<string, any>;
@@ -95,6 +97,42 @@ async function handleBlockAction(p: Payload) {
             else {
               report(e, "withdraw", { slotId });
               await tell(p, "Something went wrong withdrawing. Please try again, or message Sam.");
+            }
+          }
+        });
+        return;
+      }
+      case "give_away": {
+        const slot = await getSlot(action.value);
+        if (!slot) return tell(p, REFUSAL_TEXT.missing);
+        const mine = await getClaim(`${slot.id}_${actor.userId}`);
+        if (!mine || mine.status !== "confirmed") return tell(p, "You haven't claimed this slot, so there's nothing to give away.");
+        await slack("views.open", { trigger_id: p.trigger_id, view: giveModal(slot) });
+        return;
+      }
+      case "swap_accept":
+      case "swap_decline": {
+        const [slotId, fromUserId] = String(action.value).split("|");
+        const accept = action.action_id === "swap_accept";
+        after(async () => {
+          const done = (text: string) =>
+            slack("chat.update", { channel: p.channel.id, ts: p.message.ts, text, blocks: [{ type: "section", text: { type: "mrkdwn", text } }] });
+          try {
+            if (accept) {
+              const { slot, oldClaim, claim } = await acceptOffer(slotId, fromUserId, actor);
+              await done(`:white_check_mark: You've taken *${slotLine(slot)}* from ${oldClaim.name}.`);
+              await afterSwap(slot, oldClaim, claim);
+            } else {
+              const c = await declineOffer(slotId, fromUserId, actor);
+              const slot = await getSlot(slotId);
+              await done(`You said no thanks to ${c.name}'s slot.`);
+              await dm(fromUserId, `${actor.name} can't take *${slot ? slotLine(slot) : c.slotLabel}*, so you're still on it. You can offer it to someone else, or Withdraw.`);
+            }
+          } catch (e) {
+            if (e instanceof UserError) await done(e.message);
+            else {
+              report(e, accept ? "swap.accept" : "swap.decline", { slotId, fromUserId });
+              await tell(p, "Something went wrong. Please try again, or message Sam.");
             }
           }
         });
@@ -207,6 +245,7 @@ async function handleViewSubmission(p: Payload): Promise<Record<string, unknown>
         after(async () => {
           try {
             await postSlotToChannel(slot);
+            await syncTeamCalendar(slot.id).catch((e) => report(e, "team_calendar.sync", { slotId: slot.id }));
           } catch (e) {
             report(e, "post_to_channel", { slotId: slot.id });
             await dm(actor.userId, `:warning: Your slot was saved but I couldn't post it in the channel: ${slotLine(slot)}. Please tell Jamie.`);
@@ -227,6 +266,31 @@ async function handleViewSubmission(p: Payload): Promise<Record<string, unknown>
     if (!r.ok) return { response_action: "errors", errors: { route: REFUSAL_TEXT[r.reason] } };
     after(() => afterClaim(r.slot, r.claim).catch((e) => report(e, "afterClaim", { claimId: r.claim.id })));
     return null;
+  }
+
+  if (view.callback_id === "give_form") {
+    const toId: string | undefined = view.state.values.to?.v?.selected_user;
+    if (!toId) return { response_action: "errors", errors: { to: "Pick a colleague." } };
+    const to = await actorFor(toId);
+    if (!to) return { response_action: "errors", errors: { to: "They're not on the overtime list. Ask Sam if they should be." } };
+    try {
+      const { slot, claim } = await offerClaim(view.private_metadata, actor, to);
+      after(async () => {
+        try {
+          const msg = offerMessage(slot, claim);
+          await dm(to.userId, msg.text, msg.blocks);
+          await dm(actor.userId, `I've offered *${slotLine(slot)}* to ${to.name}. You're still on it until they accept, and I'll tell you when they reply.`);
+        } catch (e) {
+          report(e, "swap.offer_dm", { slotId: slot.id });
+          await dm(actor.userId, `:warning: I couldn't message ${to.name} about your slot. You're still on it. Please try again or tell Jamie.`).catch((e2) => report(e2, "swap.offer_dm_fallback"));
+        }
+      });
+      return null;
+    } catch (e) {
+      if (e instanceof UserError) return { response_action: "errors", errors: { to: e.message } };
+      report(e, "give_form");
+      return { response_action: "errors", errors: { to: "Something went wrong. Please try again." } };
+    }
   }
 
   if (view.callback_id === "cancel_confirm") {

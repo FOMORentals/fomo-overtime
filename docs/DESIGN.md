@@ -16,6 +16,12 @@ Agreed with Jamie in a grill-me interview on Sam's "Overtime Tracker: Project Br
 
 **Reminders.** DM at 5pm the day before; also 1 hour before for starts before 8am. Unclaimed slots: reposted in the channel at noon two days before; Sam and the poster DM'd at 4pm the same day if still empty.
 
+**Give away (added 6 Nov).** Someone on a slot can press *Give away* on the post and pick a colleague. The colleague gets a DM with *Take it* / *No thanks*. The giver stays on the slot until it's accepted; on accept the claim moves across in one transaction (spaces unchanged, same paid/leave-early route, the taker's clash check applies), calendars move, both are told. Not treated as a drop-out, so no Sam alert. Audit: `claim.offer`, `claim.offer_decline`, `claim.swap`.
+
+**Shared team calendar (added 6 Nov).** A "FOMO Overtime" Google Calendar owned by Jamie and shared with the team shows every slot: red "OPEN" while a space is free, green with names once covered, removed if cancelled. Events are "free" time so nobody looks busy. Kept in step on every change; the 15-minute cron catches up anything missed. Off until `OT_TEAM_CALENDAR_ID` is set.
+
+**Monday round-up (added 6 Nov).** Mondays from 8am, one message in #rentals_overtime listing this week's slots (Mon to Sun), who's on each and how many spaces are open.
+
 **Drop-outs.** Withdraw freely until 48 hours before. After that it's still allowed, but the slot is reposted and Sam is alerted.
 
 **Earnings.** A finished shift counts automatically unless an admin flags it. Each person sees upcoming overtime and earnings by month on the Home tab or with `/overtime me`.

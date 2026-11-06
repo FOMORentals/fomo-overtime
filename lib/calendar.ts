@@ -88,3 +88,74 @@ export async function isBusy(email: string, startAt: number, endAt: number): Pro
   if (!cal || cal.errors?.length) throw new Error(`freeBusy failed for ${email}`);
   return cal.busy.length > 0;
 }
+
+// ---------- shared team calendar ("FOMO Overtime") ----------
+// One event per slot on a calendar Jamie owns and shares with the team: red while a space is
+// open, green once covered. Written as the calendar's owner. Off until OT_TEAM_CALENDAR_ID is set.
+
+export function teamCalendarId(): string | null {
+  return process.env.OT_TEAM_CALENDAR_ID?.trim() || null;
+}
+
+function teamCalendarOwner(): string {
+  return process.env.OT_TEAM_CALENDAR_OWNER?.trim() || "jamie@fomorentals.co.uk";
+}
+
+const TOMATO = "11";
+const BASIL = "10";
+
+/** Pure: what the slot looks like on the team calendar. */
+export function teamEventBody(slot: Slot, claims: Claim[], appUrl: string) {
+  const active = claims.filter((c) => c.status === "confirmed" || c.status === "completed");
+  const names = active.map((c) => c.name + (c.route === "early_finish" ? ` (leaves ${slot.leaveEarlyAt})` : ""));
+  const open = Math.max(0, slot.spaces - active.length);
+  const what = `${slot.kind}${slot.title ? ` · ${slot.title}` : ""}`;
+  const prefix = open > 0 && slot.status !== "completed" ? (slot.spaces > 1 ? `OPEN (${open} of ${slot.spaces})` : "OPEN") : "";
+  const summary = [prefix, names.join(", "), what].filter(Boolean).join(" · ");
+  return {
+    summary,
+    description: [
+      slotLine(slot).replace(/\*/g, ""),
+      slot.details,
+      open > 0 ? "Claim it in Slack: #rentals_overtime or the Overtime app's Home tab." : "",
+      `Posted by ${slot.postedByName}. ${appUrl}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    location: process.env.OVERTIME_LOCATION || "FOMO Rentals",
+    start: { dateTime: new Date(slot.startAt).toISOString(), timeZone: "Europe/London" },
+    end: { dateTime: new Date(slot.endAt).toISOString(), timeZone: "Europe/London" },
+    status: "confirmed",
+    colorId: open > 0 && slot.status !== "completed" ? TOMATO : BASIL,
+    transparency: "transparent", // doesn't make anyone look busy
+    reminders: { useDefault: false, overrides: [] },
+  };
+}
+
+export async function upsertTeamEvent(slot: Slot, claims: Claim[], appUrl: string): Promise<void> {
+  const cal = teamCalendarId();
+  if (!cal) return;
+  const client = clientFor(teamCalendarOwner());
+  const id = eventIdFor(`team_${slot.id}`);
+  const body = teamEventBody(slot, claims, appUrl);
+  const base = `${BASE}/calendars/${encodeURIComponent(cal)}/events`;
+  try {
+    await client.request({ url: `${base}/${id}`, method: "PUT", data: body });
+  } catch (err) {
+    if (status(err) !== 404) throw err;
+    await client.request({ url: base, method: "POST", data: { ...body, id } });
+  }
+}
+
+export async function deleteTeamEvent(slotId: string): Promise<void> {
+  const cal = teamCalendarId();
+  if (!cal) return;
+  const client = clientFor(teamCalendarOwner());
+  try {
+    await client.request({ url: `${BASE}/calendars/${encodeURIComponent(cal)}/events/${eventIdFor(`team_${slotId}`)}`, method: "DELETE" });
+  } catch (err) {
+    const s = status(err);
+    if (s === 404 || s === 410) return;
+    throw err;
+  }
+}

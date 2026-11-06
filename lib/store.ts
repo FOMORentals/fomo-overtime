@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { FieldValue, type Transaction } from "firebase-admin/firestore";
 import { COL, db } from "./firestore";
-import { amountFor, canClaim, offersEarlyFinish, statusAfterCount, validateSlotInput, type ClaimRefusal } from "./rules";
+import { amountFor, canClaim, canOffer, offersEarlyFinish, statusAfterCount, validateSlotInput, type ClaimRefusal, type OfferRefusal } from "./rules";
 import { slotInstants } from "./time";
 import { slotLabel } from "./labels";
 import type { Claim, PayRun, Route, Slot, SlotInput } from "./types";
@@ -230,30 +230,8 @@ export async function claimSlot(slotId: string, actor: Actor, route: Route, now 
     const check = canClaim(slot, actor.userId, mine, now, effectiveRoute);
     if (!check.ok) return { ok: false, reason: check.reason, slot, clashWith: check.clashWith };
 
-    const claimId = `${slotId}_${actor.userId}`;
-    const claim: Claim = {
-      id: claimId,
-      slotId,
-      userId: actor.userId,
-      email: actor.email,
-      name: actor.name,
-      route: effectiveRoute,
-      amountPence: amountFor(slot, effectiveRoute),
-      status: "confirmed",
-      claimedAt: now,
-      withdrawnAt: null,
-      date: slot.date,
-      startAt: slot.startAt,
-      endAt: slot.endAt,
-      slotLabel: slotLabel(slot),
-      flagged: false,
-      flagReason: null,
-      paidRunId: null,
-      calendarEventId: null,
-      calendarError: null,
-      reminderDayBeforeAt: null,
-      reminderHourBeforeAt: null,
-    };
+    const claim = newClaim(slot, actor, effectiveRoute, now);
+    const claimId = claim.id;
     const count = slot.claimedCount + 1;
     const status = statusAfterCount(slot, count);
     const { id: _id, ...data } = claim;
@@ -262,6 +240,119 @@ export async function claimSlot(slotId: string, actor: Actor, route: Route, now 
     tx.update(ref, { claimedCount: FieldValue.increment(1), status, updatedAt: now });
     audit(tx, actor, "claim.create", { slotId, claimId, route: effectiveRoute, amountPence: claim.amountPence });
     return { ok: true, slot: { ...slot, claimedCount: count, status }, claim };
+  });
+}
+
+function newClaim(slot: Slot, actor: Actor, route: Route, now: number): Claim {
+  return {
+    id: `${slot.id}_${actor.userId}`,
+    slotId: slot.id,
+    userId: actor.userId,
+    email: actor.email,
+    name: actor.name,
+    route,
+    amountPence: amountFor(slot, route),
+    status: "confirmed",
+    claimedAt: now,
+    withdrawnAt: null,
+    date: slot.date,
+    startAt: slot.startAt,
+    endAt: slot.endAt,
+    slotLabel: slotLabel(slot),
+    flagged: false,
+    flagReason: null,
+    paidRunId: null,
+    calendarEventId: null,
+    calendarError: null,
+    reminderDayBeforeAt: null,
+    reminderHourBeforeAt: null,
+    offerTo: null,
+    offerToName: null,
+    offerAt: null,
+    swappedTo: null,
+  };
+}
+
+const OFFER_TEXT: Record<OfferRefusal, string> = {
+  not_yours: "You haven't claimed this slot.",
+  started: "This slot has already started or closed.",
+  self: "You can't give it to yourself.",
+  already_on_it: "They're already on this slot.",
+};
+
+/** Give away, step 1: offer my claim to a colleague. I stay on it until they accept. */
+export async function offerClaim(slotId: string, from: Actor, to: Actor, now = Date.now()): Promise<{ slot: Slot; claim: Claim }> {
+  return db().runTransaction(async (tx) => {
+    const slotRef = db().collection(COL.slots).doc(slotId);
+    const claimRef = db().collection(COL.claims).doc(`${slotId}_${from.userId}`);
+    const toRef = db().collection(COL.claims).doc(`${slotId}_${to.userId}`);
+    const [slotSnap, claimSnap, toSnap] = await Promise.all([tx.get(slotRef), tx.get(claimRef), tx.get(toRef)]);
+    if (!slotSnap.exists) throw new UserError("That slot no longer exists.");
+    const slot = { ...(slotSnap.data() as Omit<Slot, "id">), id: slotId };
+    const claim = claimSnap.exists ? { ...(claimSnap.data() as Omit<Claim, "id">), id: claimSnap.id } : null;
+    const refusal = canOffer(slot, claim, from.userId, to.userId, toSnap.exists ? (toSnap.data() as Claim) : null, now);
+    if (refusal) throw new UserError(OFFER_TEXT[refusal]);
+    const fields = { offerTo: to.userId, offerToName: to.name, offerAt: now };
+    tx.update(claimRef, fields);
+    audit(tx, from, "claim.offer", { slotId, claimId: claim!.id, toUserId: to.userId, toName: to.name });
+    return { slot, claim: { ...claim!, ...fields } };
+  });
+}
+
+/** Give away, step 2: the colleague accepts. Their claim replaces mine in one transaction; spaces don't change. */
+export async function acceptOffer(
+  slotId: string,
+  fromUserId: string,
+  to: Actor,
+  now = Date.now(),
+): Promise<{ slot: Slot; oldClaim: Claim; claim: Claim }> {
+  return db().runTransaction(async (tx) => {
+    const slotRef = db().collection(COL.slots).doc(slotId);
+    const oldRef = db().collection(COL.claims).doc(`${slotId}_${fromUserId}`);
+    const [slotSnap, oldSnap, mineSnap] = await Promise.all([
+      tx.get(slotRef),
+      tx.get(oldRef),
+      tx.get(db().collection(COL.claims).where("userId", "==", to.userId).where("status", "==", "confirmed")),
+    ]);
+    if (!slotSnap.exists) throw new UserError("That slot no longer exists.");
+    const slot = { ...(slotSnap.data() as Omit<Slot, "id">), id: slotId };
+    const old = oldSnap.exists ? { ...(oldSnap.data() as Omit<Claim, "id">), id: oldSnap.id } : null;
+    if (!old || old.status !== "confirmed" || old.offerTo !== to.userId) throw new UserError("This offer is no longer open.");
+    const route: Route = old.route === "early_finish" && offersEarlyFinish(slot) ? "early_finish" : "paid";
+    // Check as if the giver's space were free, so "full" doesn't block the hand-over.
+    const check = canClaim({ ...slot, claimedCount: slot.claimedCount - 1 }, to.userId, mineSnap.docs.map((d) => d.data() as Claim), now, route);
+    if (!check.ok) {
+      const why: Record<ClaimRefusal, string> = {
+        not_open: "That slot has been cancelled or has already happened.",
+        started: "That slot has already started.",
+        full: "That slot is full.",
+        already_claimed: "You're already on this slot.",
+        clash: "You already have overtime booked at that time, so you can't take this one.",
+      };
+      throw new UserError(why[check.reason]);
+    }
+    const claim = newClaim(slot, to, route, now);
+    const { id: _id, ...data } = claim;
+    void _id;
+    const oldFields = { status: "withdrawn" as const, withdrawnAt: now, offerTo: null, offerToName: null, offerAt: null, swappedTo: to.userId };
+    tx.update(oldRef, oldFields);
+    tx.set(db().collection(COL.claims).doc(claim.id), data);
+    tx.update(slotRef, { updatedAt: now });
+    audit(tx, to, "claim.swap", { slotId, fromClaimId: old.id, toClaimId: claim.id, route, amountPence: claim.amountPence });
+    return { slot: { ...slot, updatedAt: now }, oldClaim: { ...old, ...oldFields }, claim };
+  });
+}
+
+/** Give away: the colleague says no. The giver stays on it. */
+export async function declineOffer(slotId: string, fromUserId: string, to: Actor): Promise<Claim> {
+  return db().runTransaction(async (tx) => {
+    const ref = db().collection(COL.claims).doc(`${slotId}_${fromUserId}`);
+    const snap = await tx.get(ref);
+    const c = snap.exists ? { ...(snap.data() as Omit<Claim, "id">), id: snap.id } : null;
+    if (!c || c.status !== "confirmed" || c.offerTo !== to.userId) throw new UserError("This offer is no longer open.");
+    tx.update(ref, { offerTo: null, offerToName: null, offerAt: null });
+    audit(tx, to, "claim.offer_decline", { slotId, claimId: c.id });
+    return c;
   });
 }
 
@@ -395,6 +486,11 @@ export async function releaseLock(name: string, token: string) {
     const snap = await tx.get(ref);
     if ((snap.data() as { token?: string } | undefined)?.token === token) tx.delete(ref);
   });
+}
+
+export async function getMeta(key: string): Promise<Record<string, unknown> | null> {
+  const snap = await db().collection(COL.meta).doc(key).get();
+  return snap.exists ? (snap.data() as Record<string, unknown>) : null;
 }
 
 export async function setMeta(key: string, data: Record<string, unknown>) {

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { homeView, payRunBlocks, readSlotForm, routeModal, slotLine, slotMessage, slotModal } from "./views";
+import { homeView, offerMessage, payRunBlocks, readSlotForm, roundupMessage, routeModal, slotLine, slotMessage, slotModal } from "./views";
+import { teamEventBody } from "./calendar";
 import { slotInstants, londonToUtc } from "./time";
 import type { Claim, Slot } from "./types";
 
@@ -74,4 +75,41 @@ test("home view and pay run render", () => {
   const pr = payRunBlocks(run, [{ ...claim, route: "paid", amountPence: 2500, status: "completed" }], { admin: "https://x/a", csv: "https://x/c" }, "sam");
   assert.match(JSON.stringify(pr.blocks), /payrun_approve/);
   assert.match(pr.text, /£25 total/);
+});
+
+test("claimed slot offers Give away", () => {
+  const json = JSON.stringify(slotMessage({ ...s, claimedCount: 1, status: "full" }, [claim], "https://x").blocks);
+  assert.match(json, /"action_id":"give_away"/);
+  assert.doesNotMatch(JSON.stringify(slotMessage(s, [], "https://x").blocks), /give_away/);
+});
+
+test("offer DM carries Take it / No thanks with the slot and giver", () => {
+  const m = offerMessage(s, { userId: "U1", name: "Rosie", route: "early_finish" });
+  const json = JSON.stringify(m.blocks);
+  assert.match(json, /"action_id":"swap_accept","value":"s1\|U1"/);
+  assert.match(json, /"action_id":"swap_decline"/);
+  assert.match(m.text, /Rosie would like to give you/);
+  assert.match(m.text, /leave at 15:00/);
+});
+
+test("round-up lists slots with who is on them and what is open", () => {
+  const two: Slot = { ...s, id: "s2", kind: "Late closing", spaces: 2, leaveEarlyAt: null };
+  const m = roundupMessage([s, two], [claim, { ...claim, id: "s2_U2", slotId: "s2", userId: "U2", name: "Louis" }]);
+  assert.match(m.text, /EARLY OPENING.*· Rosie/);
+  assert.match(m.text, /LATE CLOSING.*\*OPEN \(1 of 2\)\* · Louis/);
+  assert.match(m.text, /1 space is still open/);
+  assert.match(roundupMessage([], []).text, /nothing posted yet/);
+  assert.match(roundupMessage([s], [claim]).text, /Everything's covered/);
+});
+
+test("team calendar event: red OPEN until covered, then green with names", () => {
+  const open = teamEventBody(s, [], "https://x");
+  assert.equal(open.summary, "OPEN · Early opening · Andrew Berekdar");
+  assert.equal(open.colorId, "11");
+  const covered = teamEventBody({ ...s, status: "full" }, [claim], "https://x");
+  assert.equal(covered.summary, "Rosie (leaves 15:00) · Early opening · Andrew Berekdar");
+  assert.equal(covered.colorId, "10");
+  const part = teamEventBody({ ...s, spaces: 2 }, [{ ...claim, route: "paid" }], "https://x");
+  assert.equal(part.summary, "OPEN (1 of 2) · Rosie · Early opening · Andrew Berekdar");
+  assert.equal(teamEventBody({ ...s, status: "cancelled" }, [claim, { ...claim, status: "withdrawn", name: "X" }], "https://x").summary.includes("X"), false);
 });

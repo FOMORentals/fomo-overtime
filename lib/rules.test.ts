@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   amountFor, calendarWindow, canClaim, claimsToComplete, dueNudges, isLateWithdrawal, money, pairedSlotWarnings,
-  parseFee, payRunCsv, payRunDue, payableClaims, statusAfterCount, totalsByPerson, validateSlotInput, HOUR,
+  parseFee, payRunCsv, payRunDue, payableClaims, statusAfterCount, roundupDue, slotsInWeek, canOffer, totalsByPerson, validateSlotInput, HOUR,
 } from "./rules";
 import { londonToUtc, slotInstants, summaryDay } from "./time";
 import type { Claim, Slot, SlotInput } from "./types";
@@ -179,4 +179,32 @@ test("fee parsing and display", () => {
   assert.equal(money(0), "Free");
   assert.equal(money(2500), "£25");
   assert.equal(money(1250), "£12.50");
+});
+
+test("Monday round-up is due on Mondays from 8am only", () => {
+  assert.equal(roundupDue(londonToUtc("2026-11-09", "07:59")), null);
+  assert.equal(roundupDue(londonToUtc("2026-11-09", "08:00")), "2026-11-09");
+  assert.equal(roundupDue(londonToUtc("2026-11-10", "09:00")), null);
+});
+
+test("round-up covers Monday to Sunday, without cancelled slots", () => {
+  const list = [
+    slot({ id: "a", date: "2026-11-09" }),
+    slot({ id: "b", date: "2026-11-15" }),
+    slot({ id: "c", date: "2026-11-16" }),
+    slot({ id: "d", date: "2026-11-11", status: "cancelled" }),
+  ];
+  assert.deepEqual(slotsInWeek(list, "2026-11-09").map((s) => s.id), ["a", "b"]);
+});
+
+test("give away: only your own confirmed claim, before it starts, to someone not already on it", () => {
+  const s = slot();
+  const mine = claim();
+  assert.equal(canOffer(s, mine, "U1", "U2", null, NOW), null);
+  assert.equal(canOffer(s, null, "U1", "U2", null, NOW), "not_yours");
+  assert.equal(canOffer(s, { status: "withdrawn" }, "U1", "U2", null, NOW), "not_yours");
+  assert.equal(canOffer(s, mine, "U1", "U1", null, NOW), "self");
+  assert.equal(canOffer(s, mine, "U1", "U2", { status: "confirmed" }, NOW), "already_on_it");
+  assert.equal(canOffer(s, mine, "U1", "U2", { status: "withdrawn" }, NOW), null);
+  assert.equal(canOffer(s, mine, "U1", "U2", null, s.startAt), "started");
 });

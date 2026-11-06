@@ -204,6 +204,37 @@ export function payRunDue(now: number, summaryDayFor: (month: string) => string)
   return month;
 }
 
+/** Monday round-up: due on Mondays from 08:00 London. Returns that Monday's date (one round-up per week). */
+export function roundupDue(now: number): string | null {
+  const p = londonParts(now);
+  if (p.weekday !== 1 || minutesOf(p.time) < 8 * 60) return null;
+  return p.date;
+}
+
+/** Slots happening Monday to Sunday of the week starting `monday`, not cancelled, in time order. */
+export function slotsInWeek(slots: Slot[], monday: string): Slot[] {
+  const end = addDays(monday, 7);
+  return slots.filter((s) => s.date >= monday && s.date < end && s.status !== "cancelled").sort((a, b) => a.startAt - b.startAt);
+}
+
+export type OfferRefusal = "not_yours" | "started" | "self" | "already_on_it";
+
+/** Give away: can `from` hand their claim on this slot to `toUserId`? (The recipient's clash check happens on accept.) */
+export function canOffer(
+  slot: Pick<Slot, "startAt" | "status">,
+  claim: Pick<Claim, "status"> | null,
+  fromUserId: string,
+  toUserId: string,
+  recipientClaim: Pick<Claim, "status"> | null,
+  now: number,
+): OfferRefusal | null {
+  if (!claim || claim.status !== "confirmed") return "not_yours";
+  if (slot.startAt <= now || (slot.status !== "open" && slot.status !== "full")) return "started";
+  if (fromUserId === toUserId) return "self";
+  if (recipientClaim && recipientClaim.status === "confirmed") return "already_on_it";
+  return null;
+}
+
 export function money(pence: number): string {
   if (pence === 0) return "Free";
   const pounds = pence / 100;

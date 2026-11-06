@@ -4,7 +4,7 @@
  * is tried separately; a failure is reported to Sentry and recorded on the claim, never swallowed.
  */
 import { adminLink } from "./admin-link";
-import { deleteEvent, isBusy, upsertEvent } from "./calendar";
+import { deleteEvent, deleteTeamEvent, isBusy, teamCalendarId, upsertEvent, upsertTeamEvent } from "./calendar";
 import { appUrl, report } from "./report";
 import { calendarWindow } from "./rules";
 import { dm, dmEmail, overtimeChannel, slack } from "./slack";
@@ -25,6 +25,24 @@ export async function refreshSlotMessage(slotId: string) {
   if (!slot?.channel || !slot.messageTs) return;
   const claims = await claimsForSlot(slotId);
   await slack("chat.update", { channel: slot.channel, ts: slot.messageTs, ...slotMessage(slot, claims, appUrl()) });
+}
+
+/** Keep the shared team calendar in step with the slot. Records what it synced so the cron can retry. */
+export async function syncTeamCalendar(slotId: string) {
+  if (!teamCalendarId()) return;
+  const slot = await getSlot(slotId);
+  if (!slot) return;
+  if (slot.status === "cancelled") await deleteTeamEvent(slot.id);
+  else await upsertTeamEvent(slot, await claimsForSlot(slot.id), appUrl());
+  await updateSlotFields(slot.id, { teamCalendarSyncedAt: slot.updatedAt });
+}
+
+/** After any change to a slot: update its channel post and the team calendar. */
+export async function refreshSlot(slotId: string) {
+  await Promise.all([
+    safe("slack.refresh", () => refreshSlotMessage(slotId), { slotId }),
+    safe("team_calendar.sync", () => syncTeamCalendar(slotId), { slotId }),
+  ]);
 }
 
 export async function permalink(slot: Slot): Promise<string | null> {
@@ -70,14 +88,14 @@ export async function afterClaim(slot: Slot, claim: Claim) {
   });
   await Promise.all([
     syncCalendar(slot, claim),
-    safe("slack.refresh", () => refreshSlotMessage(slot.id)),
+    refreshSlot(slot.id),
     safe("dm.claim_confirm", () => dm(claim.userId, claimConfirmation(slot, claim, busy))),
   ]);
   await safe("home.publish", () => publishHome(claim.userId));
 }
 
 export async function afterWithdraw(slot: Slot, claim: Claim, late: boolean, actor: Actor) {
-  await Promise.all([removeCalendar(claim), safe("slack.refresh", () => refreshSlotMessage(slot.id))]);
+  await Promise.all([removeCalendar(claim), refreshSlot(slot.id)]);
   await safe("dm.withdraw_confirm", () => dm(claim.userId, `You've withdrawn from *${slotLine(slot)}*. It's off your calendar.`));
   if (late) {
     await safe("slack.late_repost", () => repostSlot(slot, `:rotating_light: *Back up for grabs* (${actor.name} can't make it): ${slotLine(slot)}`));
@@ -90,7 +108,7 @@ export async function afterWithdraw(slot: Slot, claim: Claim, late: boolean, act
 }
 
 export async function afterEdit(slot: Slot, claims: Claim[], actor: Actor) {
-  await safe("slack.refresh", () => refreshSlotMessage(slot.id));
+  await refreshSlot(slot.id);
   for (const c of claims) {
     await syncCalendar(slot, c);
     if (c.userId !== actor.userId)
@@ -101,12 +119,21 @@ export async function afterEdit(slot: Slot, claims: Claim[], actor: Actor) {
 }
 
 export async function afterCancel(slot: Slot, claims: Claim[], actor: Actor) {
-  await safe("slack.refresh", () => refreshSlotMessage(slot.id));
+  await refreshSlot(slot.id);
   for (const c of claims) {
     await removeCalendar(c);
     await safe("dm.slot_cancelled", () => dm(c.userId, `:x: ${actor.name} cancelled *${slotLine(slot)}*. It's been taken off your calendar, and nothing is owed for it.`));
     await safe("home.publish", () => publishHome(c.userId));
   }
+}
+
+/** Give away accepted: move the calendar event, update the post and tell both people. */
+export async function afterSwap(slot: Slot, oldClaim: Claim, claim: Claim) {
+  await Promise.all([removeCalendar(oldClaim), syncCalendar(slot, claim), refreshSlot(slot.id)]);
+  await safe("dm.swap_giver", () => dm(oldClaim.userId, `:handshake: ${claim.name} has taken *${slotLine(slot)}* off your hands. It's off your calendar.`));
+  await safe("dm.swap_taker", () => dm(claim.userId, claimConfirmation(slot, claim, false)));
+  await safe("home.publish", () => publishHome(oldClaim.userId));
+  await safe("home.publish", () => publishHome(claim.userId));
 }
 
 /** Post a reminder in the slot's thread and show it in the channel. */
