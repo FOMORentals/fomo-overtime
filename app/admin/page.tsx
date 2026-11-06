@@ -171,8 +171,8 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
           <tbody>
             {slots.filter((s) => s.startAt > now).map((s) => (
               <tr key={s.id}>
-                <td>{prettyDate(s.date)} {s.startTime}–{s.endTime}</td>
-                <td>{s.kind} · {s.title}{s.rentmanJob ? ` · #${s.rentmanJob}` : ""}</td>
+                <td>{prettyDate(s.date)} {s.startTime}</td>
+                <td>{s.kind} · {s.title}</td>
                 <td className="num">{money(s.feePence)}</td>
                 <td className={s.claimedCount < s.spaces ? "warn" : "ok"}>{s.claimedCount} of {s.spaces}</td>
               </tr>

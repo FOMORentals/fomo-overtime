@@ -4,7 +4,9 @@ export type SlotStatus = "open" | "full" | "cancelled" | "completed";
 export type Route = "paid" | "early_finish";
 export type ClaimStatus = "confirmed" | "withdrawn" | "cancelled" | "completed";
 
-export const SLOT_KINDS = ["Early opening", "Early collection", "Late closing", "Late return", "Weekend opening", "Weekend closing", "Other"] as const;
+export const SLOT_KINDS = ["Early opening", "Late closing", "Weekend opening", "Weekend closing", "Other"] as const;
+/** Slots are a single time (Sam, 6 Nov): the end is set this many minutes after the start, for clash checks and calendars. */
+export const SLOT_MINUTES = 30;
 
 export interface SlotInput {
   kind: string;

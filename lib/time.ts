@@ -85,6 +85,28 @@ export function weekdayOf(date: string): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
+/** What people type for a time: "17:35", "1735", "5:35pm", "17.35", "7am" → "HH:MM", or null if it isn't a time. */
+export function parseTime(raw: string | null | undefined): string | null {
+  const s = (raw ?? "").trim().toLowerCase().replace(/\s+/g, "");
+  const m = s.match(/^(\d{1,2})(?:[:.h]?(\d{2}))?(am|pm)?$/);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2] ?? 0);
+  if (m[3]) {
+    if (h < 1 || h > 12) return null;
+    if (m[3] === "pm" && h !== 12) h += 12;
+    if (m[3] === "am" && h === 12) h = 0;
+  }
+  if (h > 23 || min > 59) return null;
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
+/** "23:45" + 30 → "00:15" (wraps past midnight). */
+export function addMinutesToTime(time: string, minutes: number): string {
+  const t = (minutesOf(time) + minutes) % (24 * 60);
+  return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+}
+
 /** Start/end instants for a slot. An end time at or before the start means it runs past midnight. */
 export function slotInstants(date: string, startTime: string, endTime: string): { startAt: number; endAt: number } {
   const startAt = londonToUtc(date, startTime);

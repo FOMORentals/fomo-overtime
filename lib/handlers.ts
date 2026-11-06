@@ -229,6 +229,8 @@ async function handleViewSubmission(p: Payload): Promise<Record<string, unknown>
 
   if (view.callback_id === "slot_form") {
     const f = readSlotForm(view.state.values);
+    if (!f.startTime) return { response_action: "errors", errors: { startTime: "Type a time like 05:40 or 17:35." } };
+    if (f.leaveEarlyAtRaw && !f.leaveEarlyAt) return { response_action: "errors", errors: { leaveEarlyAt: "Type a time like 15:30, or leave it blank." } };
     const feePence = parseFee(f.feeRaw);
     if (feePence === null) return { response_action: "errors", errors: { fee: "Type a number of pounds, e.g. 25, or Free." } };
     const input: SlotInput = {

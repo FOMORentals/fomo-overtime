@@ -1,6 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { finalFriday, londonParts, londonToUtc, slotInstants, summaryDay, prettyDate } from "./time";
+import { addMinutesToTime, finalFriday, londonParts, londonToUtc, parseTime, slotInstants, summaryDay, prettyDate } from "./time";
+
+test("parseTime understands how people type times", () => {
+  for (const [raw, want] of [["17:35", "17:35"], ["1735", "17:35"], ["17.35", "17:35"], ["5:35pm", "17:35"], ["5:35 PM", "17:35"], ["7am", "07:00"], ["12am", "00:00"], ["12pm", "12:00"], ["0540", "05:40"], ["5:40", "05:40"], ["7", "07:00"]] as const)
+    assert.equal(parseTime(raw), want, raw);
+  for (const bad of ["", "25:00", "17:60", "13pm", "abc", "17:3"]) assert.equal(parseTime(bad), null, bad);
+});
+
+test("addMinutesToTime wraps past midnight", () => {
+  assert.equal(addMinutesToTime("17:35", 30), "18:05");
+  assert.equal(addMinutesToTime("23:45", 30), "00:15");
+});
 
 test("London winter time is UTC", () => {
   assert.equal(new Date(londonToUtc("2026-11-10", "05:40")).toISOString(), "2026-11-10T05:40:00.000Z");

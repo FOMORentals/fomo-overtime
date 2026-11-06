@@ -6,7 +6,7 @@ Agreed with Jamie in a grill-me interview on Sam's "Overtime Tracker: Project Br
 
 **Who.** Sam, Louis, Rosie, Will, Margarita, plus Jamie. Admins: Sam and Jamie. Matched by fomorentals.co.uk email (`lib/staff.ts`).
 
-**Posting.** Anyone runs `/overtime` (or "Post overtime" on the app's Home tab): type, client/job, Rentman job number, date, start and end (any time of day; an end before the start runs past midnight), fee in £ or Free, people needed, notes, and for slots starting before 9am an optional leave-early time. The slot is posted to the channel with Claim / Withdraw buttons and an Edit / Cancel menu (poster or admin).
+**Posting.** Anyone runs `/overtime` (or "Post overtime" on the app's Home tab): type (Early opening, Late closing, Weekend opening, Weekend closing, Other), client/job, date, a single time typed to the minute (e.g. 17:35; Sam, 6 Nov: no end time and no Rentman number, slots count as 30 minutes for clash checks and calendars), fee in £ or Free, people needed, notes, and for slots starting before 9am an optional leave-early time. The slot is posted to the channel with Claim / Withdraw buttons and an Edit / Cancel menu (poster or admin).
 
 **Free slots.** Sam: "Free are unpaid overtime opportunities, mostly between 8am and 7pm, or before or after other overtime slots" (only the first of two back-to-back slots is paid). So any time is allowed, the poster sets the fee, and INCLUDED is treated as Free. Two paid slots one person does within an hour of each other are flagged in the month-end summary for Sam to check.
 
@@ -30,4 +30,4 @@ Agreed with Jamie in a grill-me interview on Sam's "Overtime Tracker: Project Br
 
 **Audit.** Every create, claim, withdraw, edit, cancel, completion, flag and pay-run step is written to `ot_audit` with who and when.
 
-**Not in v1.** Payroll integration (export only). Rentman-suggested slots. Rentman job numbers are shown as text, not links (a link needs Rentman's internal project id, which would mean extra Rentman API calls).
+**Not in v1.** Payroll integration (export only). Rentman-suggested slots. Rentman job numbers (removed from the form on 6 Nov at Sam's request).

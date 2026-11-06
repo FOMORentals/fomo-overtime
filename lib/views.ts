@@ -1,15 +1,16 @@
 /** Slack Block Kit layouts. Pure functions (tested in views.test.ts). */
 import { money, offersEarlyFinish, pairedSlotWarnings, spacesLeft, totalsByPerson } from "./rules";
-import { londonParts, monthLabel, prettyDate } from "./time";
-import { SLOT_KINDS, type Claim, type PayRun, type Slot } from "./types";
+import { addMinutesToTime, londonParts, monthLabel, parseTime, prettyDate } from "./time";
+import { SLOT_KINDS, SLOT_MINUTES, type Claim, type PayRun, type Slot } from "./types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Block = Record<string, any>;
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-export function timeRange(s: Pick<Slot, "startTime" | "endTime">) {
-  return `${s.startTime}–${s.endTime}`;
+/** Slots are a single time now (Sam, 6 Nov). */
+export function timeRange(s: Pick<Slot, "startTime">) {
+  return s.startTime;
 }
 
 /** One line, like the old Slack posts: "EARLY OPENING · Tue 10 Nov · 05:40–06:10 · £50 · Andrew Berekdar · 11887" */
@@ -83,20 +84,19 @@ export function slotModal(existing: Slot | null, defaultDate: string): Block {
     blocks: [
       input("kind", "Type", {
         type: "static_select",
-        options: SLOT_KINDS.map((k) => opt(k)),
+        // An older slot may carry a type that's since been retired; keep it selectable when editing.
+        options: [...SLOT_KINDS, ...(v && !(SLOT_KINDS as readonly string[]).includes(v.kind) ? [v.kind] : [])].map((k) => opt(k)),
         initial_option: opt(v?.kind ?? "Early opening"),
       }),
       input("title", "Client / job", { type: "plain_text_input", initial_value: v?.title ?? "", placeholder: { type: "plain_text", text: "e.g. Andrew Berekdar" } }),
-      input("rentmanJob", "Rentman job number", { type: "plain_text_input", initial_value: v?.rentmanJob ?? "" }, true),
       input("date", "Date", { type: "datepicker", initial_date: v?.date ?? defaultDate }),
-      input("startTime", "Start", { type: "timepicker", initial_time: v?.startTime ?? "07:00" }),
-      input("endTime", "End", { type: "timepicker", initial_time: v?.endTime ?? "07:30" }, false, "An end time earlier than the start means it runs past midnight."),
+      input("startTime", "Time", { type: "plain_text_input", initial_value: v?.startTime ?? "", placeholder: { type: "plain_text", text: "e.g. 05:40 or 17:35" } }, false, "24-hour clock, to the minute."),
       input("fee", "Fee", { type: "plain_text_input", initial_value: v ? (v.feePence ? String(v.feePence / 100) : "Free") : "25" }, false, "Pounds, e.g. 25, or Free"),
       input("spaces", "People needed", { type: "number_input", is_decimal_allowed: false, min_value: "1", max_value: "10", initial_value: String(v?.spaces ?? 1) }),
       input(
         "leaveEarlyAt",
         "Leave-early option",
-        { type: "timepicker", ...(v?.leaveEarlyAt ? { initial_time: v.leaveEarlyAt } : {}) },
+        { type: "plain_text_input", initial_value: v?.leaveEarlyAt ?? "", placeholder: { type: "plain_text", text: "e.g. 15:30" } },
         true,
         "Only for slots before 9am: the time they can leave if they choose to work through instead of being paid.",
       ),
@@ -111,14 +111,16 @@ export function readSlotForm(values: Record<string, Record<string, any>>) {
   return {
     kind: g("kind")?.selected_option?.value ?? "Other",
     title: (g("title")?.value ?? "").trim(),
-    rentmanJob: (g("rentmanJob")?.value ?? "").trim().replace(/^#/, ""),
+    rentmanJob: "",
     details: (g("details")?.value ?? "").trim(),
     date: g("date")?.selected_date ?? "",
-    startTime: g("startTime")?.selected_time ?? "",
-    endTime: g("endTime")?.selected_time ?? "",
+    startTimeRaw: (g("startTime")?.value ?? "").trim(),
+    startTime: parseTime(g("startTime")?.value) ?? "",
+    endTime: addMinutesToTime(parseTime(g("startTime")?.value) ?? "00:00", SLOT_MINUTES),
     feeRaw: g("fee")?.value ?? "",
     spaces: Number(g("spaces")?.value ?? 1),
-    leaveEarlyAt: g("leaveEarlyAt")?.selected_time || null,
+    leaveEarlyAtRaw: (g("leaveEarlyAt")?.value ?? "").trim(),
+    leaveEarlyAt: parseTime(g("leaveEarlyAt")?.value),
   };
 }
 

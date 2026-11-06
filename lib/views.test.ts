@@ -20,7 +20,7 @@ const claim: Claim = {
 };
 
 test("slot line reads like the old Slack posts", () => {
-  assert.equal(slotLine(s), "EARLY OPENING · Tue 10 Nov · 05:40–06:10 · £50 · Andrew Berekdar · #11887");
+  assert.equal(slotLine(s), "EARLY OPENING · Tue 10 Nov · 05:40 · £50 · Andrew Berekdar · #11887");
 });
 
 test("open slot message has Claim and the leave-early note", () => {
@@ -58,9 +58,24 @@ test("form round trip", () => {
   }
   const f = readSlotForm(values);
   assert.deepEqual(f, {
-    kind: "Early opening", title: "Andrew Berekdar", rentmanJob: "11887", details: "Keys in the safe", date: "2026-11-10",
-    startTime: "05:40", endTime: "06:10", feeRaw: "50", spaces: 1, leaveEarlyAt: "15:00",
+    kind: "Early opening", title: "Andrew Berekdar", rentmanJob: "", details: "Keys in the safe", date: "2026-11-10",
+    startTimeRaw: "05:40", startTime: "05:40", endTime: "06:10", feeRaw: "50", spaces: 1, leaveEarlyAtRaw: "15:00", leaveEarlyAt: "15:00",
   });
+  const json = JSON.stringify(modal);
+  assert.doesNotMatch(json, /rentmanJob|"endTime"|Early collection|Late return|timepicker/);
+});
+
+test("typed times to the minute", () => {
+  const f = readSlotForm({ startTime: { v: { value: "5:35pm" } }, leaveEarlyAt: { v: { value: "" } } });
+  assert.equal(f.startTime, "17:35");
+  assert.equal(f.endTime, "18:05");
+  assert.equal(f.leaveEarlyAt, null);
+  assert.equal(readSlotForm({ startTime: { v: { value: "nope" } } }).startTime, "");
+});
+
+test("editing an old slot keeps its retired type selectable", () => {
+  const json = JSON.stringify(slotModal({ ...s, kind: "Late return" }, s.date));
+  assert.match(json, /Late return/);
 });
 
 test("route modal offers both routes", () => {
