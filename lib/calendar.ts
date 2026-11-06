@@ -36,12 +36,12 @@ export function eventBody(slot: Slot, claim: Claim, appUrl: string) {
   const w = calendarWindow(slot, claim.route);
   const notes = [
     slotLine(slot).replace(/\*/g, ""),
-    claim.route === "early_finish" ? `Leave-early route: work through and leave at ${slot.leaveEarlyAt} (no extra pay).` : "",
+    claim.route === "early_finish" ? `Working the time instead of being paid${slot.leaveEarlyAt ? `: leave at ${slot.leaveEarlyAt}` : ""} (no extra pay).` : "",
     slot.details,
     `Posted by ${slot.postedByName}. Manage it in Slack (#rentals_overtime) or ${appUrl}.`,
   ].filter(Boolean);
   return {
-    summary: `Overtime: ${slot.kind}${slot.title ? ` · ${slot.title}` : ""}${claim.route === "early_finish" ? ` (leave ${slot.leaveEarlyAt})` : ""}`,
+    summary: `Overtime: ${slot.kind}${slot.title ? ` · ${slot.title}` : ""}${claim.route === "early_finish" ? (slot.leaveEarlyAt ? ` (leave ${slot.leaveEarlyAt})` : " (time instead)") : ""}`,
     description: notes.join("\n\n"),
     location: process.env.OVERTIME_LOCATION || "FOMO Rentals",
     start: { dateTime: new Date(w.startAt).toISOString(), timeZone: "Europe/London" },
@@ -107,7 +107,7 @@ const BASIL = "10";
 /** Pure: what the slot looks like on the team calendar. */
 export function teamEventBody(slot: Slot, claims: Claim[], appUrl: string) {
   const active = claims.filter((c) => c.status === "confirmed" || c.status === "completed");
-  const names = active.map((c) => c.name + (c.route === "early_finish" ? ` (leaves ${slot.leaveEarlyAt})` : ""));
+  const names = active.map((c) => c.name + (c.route === "early_finish" ? (slot.leaveEarlyAt ? ` (leaves ${slot.leaveEarlyAt})` : " (time instead)") : ""));
   const open = Math.max(0, slot.spaces - active.length);
   const what = `${slot.kind}${slot.title ? ` · ${slot.title}` : ""}`;
   const prefix = open > 0 && slot.status !== "completed" ? (slot.spaces > 1 ? `OPEN (${open} of ${slot.spaces})` : "OPEN") : "";

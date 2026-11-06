@@ -34,7 +34,7 @@ test("open slot message has Claim and the leave-early note", () => {
 test("covered slot shows who and offers Withdraw, not Claim", () => {
   const m = slotMessage({ ...s, claimedCount: 1, status: "full" }, [claim], "https://x");
   const json = JSON.stringify(m.blocks);
-  assert.match(json, /Covered by <@U1> \(leaving 15:00\)/);
+  assert.match(json, /Covered by <@U1> \(leaving at 15:00\)/);
   assert.match(json, /"action_id":"withdraw"/);
   assert.doesNotMatch(json, /"action_id":"claim"/);
 });
@@ -127,4 +127,11 @@ test("team calendar event: red OPEN until covered, then green with names", () =>
   const part = teamEventBody({ ...s, spaces: 2 }, [{ ...claim, route: "paid" }], "https://x");
   assert.equal(part.summary, "OPEN (1 of 2) · Rosie · Early opening · Andrew Berekdar");
   assert.equal(teamEventBody({ ...s, status: "cancelled" }, [claim, { ...claim, status: "withdrawn", name: "X" }], "https://x").summary.includes("X"), false);
+});
+
+test("route choice without a leave time reads as 'work the time instead'", () => {
+  const plain = { ...s, startTime: "17:35", leaveEarlyAt: null };
+  assert.match(JSON.stringify(routeModal(plain)), /Work the time instead/);
+  assert.match(JSON.stringify(slotMessage(plain, [], "https://x").blocks), /Option to work the time instead/);
+  assert.doesNotMatch(JSON.stringify(slotMessage({ ...plain, feePence: 0 }, [], "https://x").blocks), /work the time/);
 });

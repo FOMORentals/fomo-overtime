@@ -142,7 +142,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
               <tr key={c.id}>
                 <td>{prettyDate(c.date)} {londonParts(c.startAt).time}</td>
                 <td>{c.name}</td>
-                <td>{c.slotLabel}{c.route === "early_finish" ? " (leave early)" : ""}</td>
+                <td>{c.slotLabel}{c.route === "early_finish" ? " (time instead)" : ""}</td>
                 <td className="num">{money(c.amountPence)}</td>
                 <td>{state(c, now)}</td>
                 <td>

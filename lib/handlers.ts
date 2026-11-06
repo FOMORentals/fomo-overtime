@@ -4,7 +4,7 @@ import {
   afterCancel, afterClaim, afterEdit, afterSwap, afterWithdraw, payRunLinks, postSlotToChannel, publishHome, syncTeamCalendar,
 } from "./actions";
 import { report } from "./report";
-import { isLateWithdrawal, money, parseFee, type ClaimRefusal } from "./rules";
+import { isLateWithdrawal, money, offersEarlyFinish, parseFee, type ClaimRefusal } from "./rules";
 import { actorFor, dm, dmEmail, slack } from "./slack";
 import { APPROVER_EMAIL, PAYROLL_SENDER_EMAIL } from "./staff";
 import {
@@ -77,8 +77,8 @@ async function handleBlockAction(p: Payload) {
       case "claim": {
         const slot = await getSlot(action.value);
         if (!slot) return tell(p, REFUSAL_TEXT.missing);
-        if (slot.leaveEarlyAt) {
-          // Pre-9am slot with a leave-early option: ask which route first.
+        if (offersEarlyFinish(slot)) {
+          // Paid slot: ask whether they want the pay or to work the time instead.
           await slack("views.open", { trigger_id: p.trigger_id, view: routeModal(slot) });
           return;
         }

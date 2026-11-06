@@ -41,8 +41,14 @@ export function startsBefore9(startTime: string): boolean {
   return minutesOf(startTime) < 9 * 60;
 }
 
-export function offersEarlyFinish(slot: Pick<Slot, "startTime" | "leaveEarlyAt">): boolean {
-  return !!slot.leaveEarlyAt && startsBefore9(slot.startTime);
+/** Every paid slot lets the claimer work the time instead of being paid (Sam, 6 Nov). A leave-early time is optional detail. */
+export function offersEarlyFinish(slot: Pick<Slot, "feePence">): boolean {
+  return slot.feePence > 0;
+}
+
+/** How the "work the time" choice reads for this slot. */
+export function timeInsteadLabel(slot: Pick<Slot, "leaveEarlyAt">): string {
+  return slot.leaveEarlyAt ? `leaving at ${slot.leaveEarlyAt}` : "working the time instead";
 }
 
 export function amountFor(slot: Pick<Slot, "feePence">, route: Route): number {

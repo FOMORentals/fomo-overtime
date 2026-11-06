@@ -6,7 +6,7 @@
 import { adminLink } from "./admin-link";
 import { deleteEvent, deleteTeamEvent, isBusy, teamCalendarId, upsertEvent, upsertTeamEvent } from "./calendar";
 import { appUrl, report } from "./report";
-import { calendarWindow } from "./rules";
+import { calendarWindow, timeInsteadLabel } from "./rules";
 import { dm, dmEmail, overtimeChannel, slack } from "./slack";
 import { OPS_ALERT_EMAIL } from "./staff";
 import { claimsForSlot, claimsForUser, getSlot, liveSlots, updateClaimFields, updateSlotFields, type Actor } from "./store";
@@ -113,7 +113,7 @@ export async function afterEdit(slot: Slot, claims: Claim[], actor: Actor) {
     await syncCalendar(slot, c);
     if (c.userId !== actor.userId)
       await safe("dm.slot_changed", () =>
-        dm(c.userId, `:pencil2: ${actor.name} changed a slot you're on. It's now: *${slotLine(slot)}*${c.route === "early_finish" ? ` (leaving ${slot.leaveEarlyAt})` : ""}. Your calendar has been updated.`),
+        dm(c.userId, `:pencil2: ${actor.name} changed a slot you're on. It's now: *${slotLine(slot)}*${c.route === "early_finish" ? ` (${timeInsteadLabel(slot)})` : ""}. Your calendar has been updated.`),
       );
   }
 }

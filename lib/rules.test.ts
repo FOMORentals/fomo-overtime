@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   amountFor, calendarWindow, canClaim, claimsToComplete, dueNudges, isLateWithdrawal, money, pairedSlotWarnings,
-  parseFee, payRunCsv, payRunDue, payableClaims, statusAfterCount, roundupDue, slotsInWeek, canOffer, totalsByPerson, validateSlotInput, HOUR,
+  parseFee, payRunCsv, payRunDue, payableClaims, statusAfterCount, roundupDue, slotsInWeek, canOffer, offersEarlyFinish, totalsByPerson, validateSlotInput, HOUR,
 } from "./rules";
 import { londonToUtc, slotInstants, summaryDay } from "./time";
 import type { Claim, Slot, SlotInput } from "./types";
@@ -207,4 +207,11 @@ test("give away: only your own confirmed claim, before it starts, to someone not
   assert.equal(canOffer(s, mine, "U1", "U2", { status: "confirmed" }, NOW), "already_on_it");
   assert.equal(canOffer(s, mine, "U1", "U2", { status: "withdrawn" }, NOW), null);
   assert.equal(canOffer(s, mine, "U1", "U2", null, s.startAt), "started");
+});
+
+test("every paid slot offers 'work the time instead'; free slots don't (Sam, 6 Nov)", () => {
+  assert.equal(offersEarlyFinish(slot({ startTime: "17:35", endTime: "18:05" })), true);
+  assert.equal(offersEarlyFinish(slot({ feePence: 0 })), false);
+  const s = slot({ startTime: "17:35", endTime: "18:05" });
+  assert.deepEqual(calendarWindow(s, "early_finish"), { startAt: s.startAt, endAt: s.endAt });
 });

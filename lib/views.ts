@@ -1,5 +1,5 @@
 /** Slack Block Kit layouts. Pure functions (tested in views.test.ts). */
-import { money, offersEarlyFinish, pairedSlotWarnings, spacesLeft, totalsByPerson } from "./rules";
+import { money, offersEarlyFinish, pairedSlotWarnings, spacesLeft, timeInsteadLabel, totalsByPerson } from "./rules";
 import { addMinutesToTime, londonParts, monthLabel, parseTime, prettyDate } from "./time";
 import { SLOT_KINDS, SLOT_MINUTES, type Claim, type PayRun, type Slot } from "./types";
 
@@ -26,8 +26,9 @@ export function slotMessage(s: Slot, claims: Claim[], appUrl: string): { text: s
   const head = s.status === "cancelled" ? `~${slotLine(s)}~  *CANCELLED*` : `*${slotLine(s)}*`;
   const lines: string[] = [head];
   if (s.details) lines.push(esc(s.details));
-  if (offersEarlyFinish(s)) lines.push(`:sunrise: Option to work through and *leave at ${s.leaveEarlyAt}* instead of being paid.`);
-  const who = active.map((c) => `<@${c.userId}>${c.route === "early_finish" ? ` (leaving ${s.leaveEarlyAt})` : ""}`).join(", ");
+  if (offersEarlyFinish(s) && s.status !== "cancelled")
+    lines.push(s.leaveEarlyAt ? `:sunrise: Option to work the time instead of being paid, and *leave at ${s.leaveEarlyAt}*.` : ":sunrise: Option to work the time instead of being paid.");
+  const who = active.map((c) => `<@${c.userId}>${c.route === "early_finish" ? ` (${timeInsteadLabel(s)})` : ""}`).join(", ");
   const left = spacesLeft(s);
   let status: string;
   if (s.status === "cancelled") status = "Cancelled";
@@ -95,10 +96,10 @@ export function slotModal(existing: Slot | null, defaultDate: string): Block {
       input("spaces", "People needed", { type: "number_input", is_decimal_allowed: false, min_value: "1", max_value: "10", initial_value: String(v?.spaces ?? 1) }),
       input(
         "leaveEarlyAt",
-        "Leave-early option",
+        "Leave time if they work it (optional)",
         { type: "plain_text_input", initial_value: v?.leaveEarlyAt ?? "", placeholder: { type: "plain_text", text: "e.g. 15:30" } },
         true,
-        "Only for slots before 9am: the time they can leave if they choose to work through instead of being paid.",
+        "Anyone claiming a paid slot can choose to work the time instead of being paid. For slots before 9am you can add the time they'd leave.",
       ),
       input("details", "Notes", { type: "plain_text_input", multiline: true, initial_value: v?.details ?? "" }, true),
     ],
@@ -145,7 +146,12 @@ export function routeModal(s: Slot): Block {
           options: [
             { text: { type: "mrkdwn", text: `*Paid overtime* (${money(s.feePence)}): work the slot only` }, value: "paid" },
             {
-              text: { type: "mrkdwn", text: `*Leave early*: work through from ${s.startTime} and leave at *${s.leaveEarlyAt}*, no extra pay` },
+              text: {
+                type: "mrkdwn",
+                text: s.leaveEarlyAt
+                  ? `*Work the time instead*: start at ${s.startTime} and leave at *${s.leaveEarlyAt}*, no extra pay`
+                  : "*Work the time instead*: take the time back rather than being paid, no extra pay",
+              },
               value: "early_finish",
             },
           ],
@@ -157,7 +163,7 @@ export function routeModal(s: Slot): Block {
 
 export function claimConfirmation(s: Slot, c: Claim, calendarBusy: boolean): string {
   const parts = [`You're down for *${slotLine(s)}*.`];
-  if (c.route === "early_finish") parts.push(`You chose to work through and *leave at ${s.leaveEarlyAt}* (no extra pay).`);
+  if (c.route === "early_finish") parts.push(s.leaveEarlyAt ? `You chose to work the time and *leave at ${s.leaveEarlyAt}* (no extra pay).` : "You chose to work the time instead of being paid (no extra pay).");
   else if (c.amountPence > 0) parts.push(`${money(c.amountPence)} will be added to your overtime for ${monthLabel(s.date.slice(0, 7))}.`);
   parts.push("It's in your Google Calendar, and I'll remind you at 5pm the day before.");
   if (calendarBusy) parts.push(":warning: Heads up: your calendar already has something else at that time.");
@@ -190,7 +196,7 @@ export function giveModal(s: Slot): Block {
 /** The DM a colleague gets when someone offers them a slot. */
 export function offerMessage(s: Slot, from: Pick<Claim, "userId" | "name" | "route">): { text: string; blocks: Block[] } {
   const value = `${s.id}|${from.userId}`;
-  const leave = from.route === "early_finish" ? ` They chose the leave-early option (work through, leave at ${s.leaveEarlyAt}, no extra pay), and you'd do the same.` : "";
+  const leave = from.route === "early_finish" ? ` They chose to work the time instead of being paid${s.leaveEarlyAt ? ` (leave at ${s.leaveEarlyAt})` : ""}, and you'd do the same.` : "";
   const text = `${from.name} would like to give you *${slotLine(s)}*.${leave}`;
   return {
     text: text.replace(/\*/g, ""),
@@ -231,7 +237,7 @@ export function roundupMessage(week: Slot[], claims: Claim[]): { text: string; b
 
 function claimLine(c: Claim, showPay = true) {
   const p = londonParts(c.startAt);
-  const pay = c.route === "early_finish" ? "leave early" : money(c.amountPence);
+  const pay = c.route === "early_finish" ? "time instead" : money(c.amountPence);
   const state = c.paidRunId ? "paid" : c.flagged ? `flagged: ${c.flagReason ?? ""}` : c.status === "completed" ? "done" : "upcoming";
   return `• ${prettyDate(c.date)} ${p.time} · ${esc(c.slotLabel)}${showPay ? ` · ${pay}` : ""} · _${state}_`;
 }

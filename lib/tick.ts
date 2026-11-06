@@ -81,7 +81,7 @@ export async function runTick(deadline: number, now = Date.now()): Promise<TickR
         const c = byClaim.get(n.claimId)!;
         const s = bySlot.get(c.slotId)!;
         const when = n.kind === "reminder_day_before" ? "tomorrow" : "in an hour";
-        const leave = c.route === "early_finish" ? ` You're leaving at ${s.leaveEarlyAt}.` : "";
+        const leave = c.route === "early_finish" && s.leaveEarlyAt ? ` You're leaving at ${s.leaveEarlyAt}.` : "";
         await dm(c.userId, `:alarm_clock: Reminder: you're on *${slotLine(s)}* ${when}.${leave}`);
         await updateClaimFields(c.id, n.kind === "reminder_day_before" ? { reminderDayBeforeAt: now } : { reminderHourBeforeAt: now });
       }

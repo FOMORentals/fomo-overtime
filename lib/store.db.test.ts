@@ -50,6 +50,12 @@ test("database rules", { skip: !enabled && "set FIRESTORE_EMULATOR_HOST to run" 
     const s = await store.createSlot({ ...base, date: "2026-11-12", startTime: "06:00", endTime: "06:30", leaveEarlyAt: "15:00" }, louis, now);
     const r = await store.claimSlot(s.id, people[2], "early_finish", now);
     assert.ok(r.ok && r.claim.amountPence === 0 && r.claim.route === "early_finish");
+    const evening = await store.createSlot({ ...base, date: "2026-11-12", startTime: "17:35", endTime: "18:05" }, louis, now);
+    const r2 = await store.claimSlot(evening.id, people[2], "early_finish", now);
+    assert.ok(r2.ok && r2.claim.amountPence === 0 && r2.claim.route === "early_finish", "any paid slot can be worked as time");
+    const free = await store.createSlot({ ...base, date: "2026-11-12", startTime: "19:00", endTime: "19:30", feePence: 0 }, louis, now);
+    const r3 = await store.claimSlot(free.id, people[3], "early_finish", now);
+    assert.ok(r3.ok && r3.claim.route === "paid");
   });
 
   await t.test("only the poster or an admin can edit; spaces can't drop below claims", async () => {
