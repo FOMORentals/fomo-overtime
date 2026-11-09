@@ -135,3 +135,13 @@ test("route choice without a leave time reads as 'work the time instead'", () =>
   assert.match(JSON.stringify(slotMessage(plain, [], "https://x").blocks), /Option to work the time instead/);
   assert.doesNotMatch(JSON.stringify(slotMessage({ ...plain, feePence: 0 }, [], "https://x").blocks), /work the time/);
 });
+
+test("freelancers show by name, and the menu offers assign/remove", () => {
+  const fl: Claim = { ...claim, id: "s1_fl_eden", userId: "freelancer:s1_fl_eden", name: "Eden", route: "paid", freelancer: true };
+  const open = JSON.stringify(slotMessage({ ...s, spaces: 2, claimedCount: 1 }, [fl], "https://x").blocks);
+  assert.match(open, /Eden \(freelancer\)/);
+  assert.match(open, /assign:s1/);
+  assert.match(open, /unassign:s1/);
+  const full = JSON.stringify(slotMessage({ ...s, claimedCount: 1, status: "full" }, [fl], "https://x").blocks);
+  assert.doesNotMatch(full, /"assign:s1"/);
+});

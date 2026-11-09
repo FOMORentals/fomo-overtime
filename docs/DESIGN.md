@@ -18,6 +18,8 @@ Agreed with Jamie in a grill-me interview on Sam's "Overtime Tracker: Project Br
 
 **Work the time instead (6 Nov, Sam).** Anyone claiming a paid slot chooses Paid, or work the time instead (£0). The poster can optionally add a leave time for slots before 9am, which then goes in the choice and the calendar. Free slots skip the choice.
 
+**Freelancers (9 Nov, Louis).** The poster or an admin can pick "Assign to a freelancer" on a post's ⋮ menu and type a name (e.g. Eden). It takes a space like a claim and shows on the post, the team calendar and the round-up, marked "(freelancer)". Freelancers aren't on Slack, so they get no DMs, reminders or calendar invite, and they're paid outside overtime payroll (£0 here, never in the month-end summary). "Remove freelancer" frees the space. Audit: `claim.assign_freelancer`, `claim.remove_freelancer`.
+
 **Give away (added 6 Nov).** Someone on a slot can press *Give away* on the post and pick a colleague. The colleague gets a DM with *Take it* / *No thanks*. The giver stays on the slot until it's accepted; on accept the claim moves across in one transaction (spaces unchanged, same paid/leave-early route, the taker's clash check applies), calendars move, both are told. Not treated as a drop-out, so no Sam alert. Audit: `claim.offer`, `claim.offer_decline`, `claim.swap`.
 
 **Shared team calendar (added 6 Nov).** A "FOMO Overtime" Google Calendar owned by Jamie and shared with the team shows every slot: red "OPEN" while a space is free, green with names once covered, removed if cancelled. Events are "free" time so nobody looks busy. Kept in step on every change; the 15-minute cron catches up anything missed. Off until `OT_TEAM_CALENDAR_ID` is set.

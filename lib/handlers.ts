@@ -1,19 +1,19 @@
 /** Slack interaction handling: buttons, forms and the /overtime command. */
 import { after } from "next/server";
 import {
-  afterCancel, afterClaim, afterEdit, afterSwap, afterWithdraw, payRunLinks, postSlotToChannel, publishHome, syncTeamCalendar,
+  afterCancel, afterClaim, afterEdit, afterSwap, afterWithdraw, payRunLinks, postSlotToChannel, publishHome, refreshSlot, syncTeamCalendar,
 } from "./actions";
 import { report } from "./report";
 import { isLateWithdrawal, money, offersEarlyFinish, parseFee, type ClaimRefusal } from "./rules";
 import { actorFor, dm, dmEmail, slack } from "./slack";
 import { APPROVER_EMAIL, PAYROLL_SENDER_EMAIL } from "./staff";
 import {
-  acceptOffer, approvePayRun, cancelSlot, claimSlot, claimsByIds, claimsForUser, createSlot, declineOffer, editSlot, getClaim, getSlot,
+  acceptOffer, approvePayRun, assignFreelancer, cancelSlot, claimSlot, claimsForSlot, removeFreelancer, claimsByIds, claimsForUser, createSlot, declineOffer, editSlot, getClaim, getSlot,
   markPayRunSent, offerClaim, UserError, withdrawClaim, type Actor,
 } from "./store";
 import { londonParts, monthLabel, prettyDate } from "./time";
 import type { Route, SlotInput } from "./types";
-import { giveModal, offerMessage, payRunBlocks, readSlotForm, routeModal, slotLine, slotModal } from "./views";
+import { assignModal, giveModal, offerMessage, unassignModal, payRunBlocks, readSlotForm, routeModal, slotLine, slotModal } from "./views";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Payload = Record<string, any>;
@@ -144,6 +144,12 @@ async function handleBlockAction(p: Payload) {
         if (!slot) return tell(p, REFUSAL_TEXT.missing);
         if (!actor.admin && slot.postedBy !== actor.userId) return tell(p, "Only the person who posted it, Sam or Jamie can change this slot.");
         if (verb === "edit") await slack("views.open", { trigger_id: p.trigger_id, view: slotModal(slot, slot.date) });
+        if (verb === "assign") await slack("views.open", { trigger_id: p.trigger_id, view: assignModal(slot) });
+        if (verb === "unassign") {
+          const freelancers = (await claimsForSlot(slot.id, ["confirmed"])).filter((c) => c.freelancer);
+          if (!freelancers.length) return tell(p, "There's no freelancer on this slot.");
+          await slack("views.open", { trigger_id: p.trigger_id, view: unassignModal(slot, freelancers) });
+        }
         if (verb === "cancel")
           await slack("views.open", {
             trigger_id: p.trigger_id,
@@ -292,6 +298,28 @@ async function handleViewSubmission(p: Payload): Promise<Record<string, unknown>
       if (e instanceof UserError) return { response_action: "errors", errors: { to: e.message } };
       report(e, "give_form");
       return { response_action: "errors", errors: { to: "Something went wrong. Please try again." } };
+    }
+  }
+
+  if (view.callback_id === "assign_form" || view.callback_id === "unassign_form") {
+    const assigning = view.callback_id === "assign_form";
+    try {
+      const { slot, claim } = assigning
+        ? await assignFreelancer(view.private_metadata, view.state.values.name?.v?.value ?? "", actor)
+        : await removeFreelancer(view.state.values.who?.v?.selected_option?.value ?? "", actor);
+      after(async () => {
+        await refreshSlot(slot.id);
+        await dm(actor.userId, assigning
+          ? `:busts_in_silhouette: ${claim.name} (freelancer) is down for *${slotLine(slot)}*. They won't get Slack reminders, so please make sure they know, and they're paid outside the overtime payroll.`
+          : `${claim.name} is off *${slotLine(slot)}*, and the space is open again.`,
+        ).catch((e) => report(e, "dm.freelancer_confirm", { slotId: slot.id }));
+      });
+      return null;
+    } catch (e) {
+      const field = assigning ? "name" : "who";
+      if (e instanceof UserError) return { response_action: "errors", errors: { [field]: e.message } };
+      report(e, view.callback_id);
+      return { response_action: "errors", errors: { [field]: "Something went wrong. Please try again." } };
     }
   }
 

@@ -125,10 +125,28 @@ test("database rules", { skip: !enabled && "set FIRESTORE_EMULATOR_HOST to run" 
     assert.equal((await store.getClaim(`${a.id}_${people[2].userId}`))?.status, "confirmed");
   });
 
+  await t.test("freelancer: poster assigns, it takes a space at £0, edits keep it £0, remove frees it", async () => {
+    const s = await store.createSlot({ ...base, date: "2026-11-18", spaces: 2 }, louis, now);
+    await assert.rejects(store.assignFreelancer(s.id, "Eden", people[0], now), /Only the person/);
+    const r = await store.assignFreelancer(s.id, "Eden", louis, now);
+    assert.equal(r.claim.amountPence, 0);
+    assert.equal(r.claim.freelancer, true);
+    await assert.rejects(store.assignFreelancer(s.id, "eden", louis, now), /already on this slot/);
+    await store.claimSlot(s.id, people[0], "paid", now);
+    assert.equal((await store.getSlot(s.id))?.status, "full");
+    await assert.rejects(store.assignFreelancer(s.id, "Sky", louis, now), /Every space/);
+    const e = await store.editSlot(s.id, { ...base, date: "2026-11-18", spaces: 2, feePence: 4000 }, louis, now);
+    assert.deepEqual(e.claims.map((c) => [c.freelancer ?? false, c.amountPence]).sort(), [[false, 4000], [true, 0]]);
+    await store.removeFreelancer(r.claim.id, sam, now);
+    const fresh = await store.getSlot(s.id);
+    assert.equal(fresh?.claimedCount, 1);
+    assert.equal(fresh?.status, "open");
+  });
+
   await t.test("every change is in the audit log", async () => {
     const snap = await db().collection("ot_audit").get();
     const actions = new Set(snap.docs.map((d) => d.data().action));
-    for (const a of ["slot.create", "claim.create", "claim.withdraw", "slot.edit", "slot.cancel", "claim.complete", "payrun.create", "payrun.approve", "payrun.sent", "claim.offer", "claim.offer_decline", "claim.swap"])
+    for (const a of ["slot.create", "claim.create", "claim.withdraw", "slot.edit", "slot.cancel", "claim.complete", "payrun.create", "payrun.approve", "payrun.sent", "claim.offer", "claim.offer_decline", "claim.swap", "claim.assign_freelancer", "claim.remove_freelancer"])
       assert.ok(actions.has(a), a);
   });
 

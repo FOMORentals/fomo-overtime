@@ -107,7 +107,7 @@ const BASIL = "10";
 /** Pure: what the slot looks like on the team calendar. */
 export function teamEventBody(slot: Slot, claims: Claim[], appUrl: string) {
   const active = claims.filter((c) => c.status === "confirmed" || c.status === "completed");
-  const names = active.map((c) => c.name + (c.route === "early_finish" ? (slot.leaveEarlyAt ? ` (leaves ${slot.leaveEarlyAt})` : " (time instead)") : ""));
+  const names = active.map((c) => c.name + (c.freelancer ? " (freelancer)" : "") + (c.route === "early_finish" ? (slot.leaveEarlyAt ? ` (leaves ${slot.leaveEarlyAt})` : " (time instead)") : ""));
   const open = Math.max(0, slot.spaces - active.length);
   const what = `${slot.kind}${slot.title ? ` · ${slot.title}` : ""}`;
   const prefix = open > 0 && slot.status !== "completed" ? (slot.spaces > 1 ? `OPEN (${open} of ${slot.spaces})` : "OPEN") : "";

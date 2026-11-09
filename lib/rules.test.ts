@@ -215,3 +215,10 @@ test("every paid slot offers 'work the time instead'; free slots don't (Sam, 6 N
   const s = slot({ startTime: "17:35", endTime: "18:05" });
   assert.deepEqual(calendarWindow(s, "early_finish"), { startAt: s.startAt, endAt: s.endAt });
 });
+
+test("freelancer claims get no reminders and never reach payroll", () => {
+  const s = slot();
+  const fl = claim({ id: "s1_fl_eden", userId: "freelancer:s1_fl_eden", name: "Eden", freelancer: true, claimedAt: NOW - 5 * 86_400_000 });
+  assert.deepEqual(dueNudges([s], [fl], s.startAt - 30 * 60_000).filter((n) => "claimId" in n), []);
+  assert.deepEqual(payableClaims([{ ...fl, status: "completed", amountPence: 5000 }]), []);
+});

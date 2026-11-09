@@ -110,6 +110,7 @@ export async function afterWithdraw(slot: Slot, claim: Claim, late: boolean, act
 export async function afterEdit(slot: Slot, claims: Claim[], actor: Actor) {
   await refreshSlot(slot.id);
   for (const c of claims) {
+    if (c.freelancer) continue; // not on Slack or our calendars
     await syncCalendar(slot, c);
     if (c.userId !== actor.userId)
       await safe("dm.slot_changed", () =>
@@ -121,6 +122,7 @@ export async function afterEdit(slot: Slot, claims: Claim[], actor: Actor) {
 export async function afterCancel(slot: Slot, claims: Claim[], actor: Actor) {
   await refreshSlot(slot.id);
   for (const c of claims) {
+    if (c.freelancer) continue;
     await removeCalendar(c);
     await safe("dm.slot_cancelled", () => dm(c.userId, `:x: ${actor.name} cancelled *${slotLine(slot)}*. It's been taken off your calendar, and nothing is owed for it.`));
     await safe("home.publish", () => publishHome(c.userId));
