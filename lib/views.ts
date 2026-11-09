@@ -173,6 +173,12 @@ export function claimConfirmation(s: Slot, c: Claim, calendarBusy: boolean): str
   return parts.join("\n");
 }
 
+/**
+ * Bump this whenever the buttons or menu on a slot post change. The next cron run then
+ * rebuilds every upcoming post, so older posts get the new options too.
+ */
+export const POST_LAYOUT = 2;
+
 /** Put a freelancer (not on Slack) on a slot. */
 export function assignModal(s: Slot): Block {
   return {
