@@ -5,7 +5,7 @@ import { money, pairedSlotWarnings, totalsByPerson } from "@/lib/rules";
 import { staffByEmail } from "@/lib/staff";
 import { claimsInMonth, getPayRun, liveSlots, setClaimFlag, type Actor } from "@/lib/store";
 import { finalFriday, londonParts, monthLabel, prettyDate } from "@/lib/time";
-import type { Claim } from "@/lib/types";
+import { ClaimsList } from "./claims-list";
 
 export const dynamic = "force-dynamic";
 
@@ -38,15 +38,6 @@ function shiftMonth(month: string, delta: number) {
   const [y, m] = month.split("-").map(Number);
   const d = new Date(Date.UTC(y, m - 1 + delta, 1));
   return d.toISOString().slice(0, 7);
-}
-
-function state(c: Claim, now: number) {
-  if (c.status === "withdrawn") return <span className="pill">withdrawn</span>;
-  if (c.status === "cancelled") return <span className="pill">cancelled</span>;
-  if (c.paidRunId) return <span className="pill ok">paid ({c.paidRunId})</span>;
-  if (c.flagged) return <span className="pill bad">flagged: {c.flagReason}</span>;
-  if (c.status === "completed" || c.endAt <= now) return <span className="pill">done, unpaid</span>;
-  return <span className="pill">upcoming</span>;
 }
 
 export default async function Admin({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
@@ -133,36 +124,8 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
         </>
       )}
 
-      <h2>Every claim this month</h2>
-      <div className="scroll">
-        <table>
-          <thead><tr><th>Date</th><th>Person</th><th>Slot</th><th className="num">Amount</th><th>Status</th><th></th></tr></thead>
-          <tbody>
-            {all.map((c) => (
-              <tr key={c.id}>
-                <td>{prettyDate(c.date)} {londonParts(c.startAt).time}</td>
-                <td>{c.name}</td>
-                <td>{c.slotLabel}{c.route === "early_finish" ? " (time instead)" : ""}</td>
-                <td className="num">{money(c.amountPence)}</td>
-                <td>{state(c, now)}</td>
-                <td>
-                  {!c.paidRunId && (c.status === "completed" || c.status === "confirmed") &&
-                    (c.flagged ? (
-                      <form action={unflagAction}><input type="hidden" name="claimId" value={c.id} /><button>Unflag</button></form>
-                    ) : (
-                      <form action={flagAction} className="row">
-                        <input type="hidden" name="claimId" value={c.id} />
-                        <input type="text" name="reason" placeholder="Reason" />
-                        <button>Flag</button>
-                      </form>
-                    ))}
-                </td>
-              </tr>
-            ))}
-            {!all.length && <tr><td colSpan={6} className="muted">No claims this month.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <h2>Claims this month</h2>
+      <ClaimsList claims={all} now={now} flagAction={flagAction} unflagAction={unflagAction} />
 
       <h2>Upcoming slots</h2>
       <div className="scroll">
@@ -180,7 +143,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
           </tbody>
         </table>
       </div>
-      <p className="muted">Signed in as {email}. Flagging leaves a slot out of pay; every change is logged.</p>
+      <p className="muted">Signed in as {email}. &quot;Leave out of pay&quot; can be undone until the pay run; every change is logged.</p>
     </main>
   );
 }
