@@ -16,7 +16,7 @@ Agreed with Jamie in a grill-me interview on Sam's "Overtime Tracker: Project Br
 
 **Reminders.** DM at 5pm the day before; also 1 hour before for starts before 8am. Unclaimed slots: reposted in the channel at noon two days before; Sam and the poster DM'd at 4pm the same day if still empty.
 
-**Work the time instead (6 Nov, Sam).** Anyone claiming a paid slot chooses Paid, or work the time instead (£0). The poster can optionally add a leave time for slots before 9am, which then goes in the choice and the calendar. Free slots skip the choice.
+**Work the time instead (6 Nov, Sam).** Anyone claiming a paid slot chooses Paid, or work the time instead (£0). The poster can optionally add a leave time for slots before 9am, which then goes in the choice and the calendar. Free slots skip the choice. The post shows the option only while a space is still open; once taken, the name shows "(working the time instead)" if that was picked, otherwise it is paid (9 Nov, Louis).
 
 **Freelancers (9 Nov, Louis).** The poster or an admin can pick "Assign to a freelancer" on a post's ⋮ menu and type a name (e.g. Eden). It takes a space like a claim and shows on the post, the team calendar and the round-up, marked "(freelancer)". Freelancers aren't on Slack, so they get no DMs or reminders. An optional email (added 9 Nov, Jamie) sends them a Google Calendar invite from the assigner's own calendar (sendUpdates=all, so edits and cancellations reach them too); assigning the same name again with an email adds it later. Without an email there's no invite, and they're paid outside overtime payroll (£0 here, never in the month-end summary). "Remove freelancer" frees the space. Audit: `claim.assign_freelancer`, `claim.remove_freelancer`.
 

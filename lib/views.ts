@@ -26,10 +26,11 @@ export function slotMessage(s: Slot, claims: Claim[], appUrl: string): { text: s
   const head = s.status === "cancelled" ? `~${slotLine(s)}~  *CANCELLED*` : `*${slotLine(s)}*`;
   const lines: string[] = [head];
   if (s.details) lines.push(esc(s.details));
-  if (offersEarlyFinish(s) && s.status !== "cancelled")
+  // Only while someone can still pick it: on a taken or finished slot it read as if the claim had changed (Louis, 9 Nov).
+  const left = spacesLeft(s);
+  if (offersEarlyFinish(s) && !closed && left > 0)
     lines.push(s.leaveEarlyAt ? `:sunrise: Option to work the time instead of being paid, and *leave at ${s.leaveEarlyAt}*.` : ":sunrise: Option to work the time instead of being paid.");
   const who = active.map((c) => `${c.freelancer ? `${esc(c.name)} (freelancer)` : `<@${c.userId}>`}${c.route === "early_finish" ? ` (${timeInsteadLabel(s)})` : ""}`).join(", ");
-  const left = spacesLeft(s);
   let status: string;
   if (s.status === "cancelled") status = "Cancelled";
   else if (s.status === "completed") status = active.length ? `Done: ${who}` : "Done, nobody claimed it";
@@ -177,7 +178,7 @@ export function claimConfirmation(s: Slot, c: Claim, calendarBusy: boolean): str
  * Bump this whenever the buttons or menu on a slot post change. The next cron run then
  * rebuilds every upcoming post, so older posts get the new options too.
  */
-export const POST_LAYOUT = 2;
+export const POST_LAYOUT = 3;
 
 /** Put a freelancer (not on Slack) on a slot. */
 export function assignModal(s: Slot): Block {

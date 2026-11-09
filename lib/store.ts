@@ -61,6 +61,14 @@ export async function liveSlots(now: number): Promise<Slot[]> {
     .sort((a, b) => a.startAt - b.startAt);
 }
 
+/** Upcoming slots plus ones finished in the last two weeks: the posts still worth keeping current. */
+export async function recentSlots(now: number): Promise<Slot[]> {
+  const snap = await db().collection(COL.slots).where("status", "in", ["open", "full", "completed"]).get();
+  return snap.docs
+    .map((d) => ({ ...(d.data() as Omit<Slot, "id">), id: d.id }))
+    .filter((s) => s.endAt > now - 14 * 86_400_000);
+}
+
 export async function confirmedClaims(): Promise<Claim[]> {
   const snap = await db().collection(COL.claims).where("status", "==", "confirmed").get();
   return snap.docs.map((d) => ({ ...(d.data() as Omit<Claim, "id">), id: d.id }));

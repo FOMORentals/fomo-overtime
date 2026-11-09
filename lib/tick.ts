@@ -10,7 +10,7 @@ import { claimsToComplete, dueNudges, payRunDue, payableClaims, roundupDue, slot
 import { dm, dmEmail, overtimeChannel, slack } from "./slack";
 import { APPROVER_EMAIL, OPS_ALERT_EMAIL } from "./staff";
 import {
-  completeClaim, completeSlotIfDone, confirmedClaims, createPayRun, getMeta, getPayRun, liveSlots, setMeta, unpaidCompletedClaims,
+  completeClaim, completeSlotIfDone, confirmedClaims, recentSlots, createPayRun, getMeta, getPayRun, liveSlots, setMeta, unpaidCompletedClaims,
   updateClaimFields, updateSlotFields,
 } from "./store";
 import { summaryDay } from "./time";
@@ -124,10 +124,10 @@ export async function runTick(deadline: number, now = Date.now()): Promise<TickR
     }
   }
 
-  // 6. After the post buttons/menu change, rebuild every upcoming post once so old posts match new ones.
+  // 6. After the post layout changes, rebuild every upcoming or recent post once so old posts match new ones.
   if (!timeUp() && (await getMeta("post_layout"))?.version !== POST_LAYOUT) {
     let done = true;
-    for (const s of slots.filter((s) => s.messageTs && s.endAt > now)) {
+    for (const s of (await recentSlots(now)).filter((s) => s.messageTs)) {
       if (timeUp()) {
         done = false;
         break;
