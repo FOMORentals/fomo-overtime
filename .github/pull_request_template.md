@@ -7,7 +7,7 @@
 **Headline:** 
 **What changed:** 
 **What you do:** 
-**Screenshot:** (optional: a .png saved under whats-new/ in this repo)
+**Screenshot:** (a screenshot, mock-up or diagram of the change, saved as a .png under whats-new/ in this repo. Jamie wants one wherever possible)
 **Try it:** (optional: a link or a Slack command)
 
 ## Test plan
