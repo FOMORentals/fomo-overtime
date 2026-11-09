@@ -363,9 +363,23 @@ export function freelancerClaimId(slotId: string, name: string): string {
 }
 
 /** Poster or admin puts a freelancer (not on Slack) on a slot. Takes a space like a claim; never paid through payroll. */
-export async function assignFreelancer(slotId: string, name: string, actor: Actor, now = Date.now()): Promise<{ slot: Slot; claim: Claim }> {
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Freelancer email is optional: with one, they get a Google Calendar invite from the assigner's calendar.
+ * Assigning someone already on the slot with a (new) email just updates the email so the invite goes out.
+ */
+export async function assignFreelancer(
+  slotId: string,
+  name: string,
+  actor: Actor,
+  now = Date.now(),
+  email = "",
+): Promise<{ slot: Slot; claim: Claim; updated: boolean }> {
   const clean = name.trim().replace(/\s+/g, " ").slice(0, 60);
   if (!clean) throw new UserError("Type the freelancer's name.");
+  const mail = email.trim().toLowerCase();
+  if (mail && !EMAIL_RE.test(mail)) throw new UserError("That email doesn't look right. Leave it blank to skip the invite.");
   return db().runTransaction(async (tx) => {
     const ref = db().collection(COL.slots).doc(slotId);
     const snap = await tx.get(ref);
@@ -374,12 +388,20 @@ export async function assignFreelancer(slotId: string, name: string, actor: Acto
     if (!canManage(slot, actor)) throw new UserError("Only the person who posted it, Sam or Jamie can assign a freelancer.");
     if (slot.status !== "open" && slot.status !== "full") throw new UserError("This slot is closed.");
     if (slot.startAt <= now) throw new UserError("This slot has already started.");
-    if (spacesLeft(slot) <= 0) throw new UserError("Every space is already taken. Someone needs to withdraw first.");
     const id = freelancerClaimId(slotId, clean);
-    const existing = await tx.get(db().collection(COL.claims).doc(id));
-    if (existing.exists && (existing.data() as Claim).status === "confirmed") throw new UserError(`${clean} is already on this slot.`);
-    const base = newClaim(slot, { userId: `freelancer:${id}`, email: "", name: clean, admin: false }, "paid", now);
-    const claim: Claim = { ...base, id, amountPence: 0, freelancer: true };
+    const existingRef = db().collection(COL.claims).doc(id);
+    const existing = await tx.get(existingRef);
+    if (existing.exists && (existing.data() as Claim).status === "confirmed") {
+      const cur = { ...(existing.data() as Omit<Claim, "id">), id };
+      if (!mail || mail === cur.email) throw new UserError(`${clean} is already on this slot.`);
+      const fields = { email: mail, invitedBy: actor.email };
+      tx.update(existingRef, fields);
+      audit(tx, actor, "claim.freelancer_email", { slotId, claimId: id });
+      return { slot, claim: { ...cur, ...fields }, updated: true };
+    }
+    if (spacesLeft(slot) <= 0) throw new UserError("Every space is already taken. Someone needs to withdraw first.");
+    const base = newClaim(slot, { userId: `freelancer:${id}`, email: mail, name: clean, admin: false }, "paid", now);
+    const claim: Claim = { ...base, id, amountPence: 0, freelancer: true, invitedBy: mail ? actor.email : null };
     const { id: _id, ...data } = claim;
     void _id;
     const count = slot.claimedCount + 1;
@@ -387,7 +409,7 @@ export async function assignFreelancer(slotId: string, name: string, actor: Acto
     tx.set(db().collection(COL.claims).doc(id), data);
     tx.update(ref, { claimedCount: FieldValue.increment(1), status, updatedAt: now });
     audit(tx, actor, "claim.assign_freelancer", { slotId, claimId: id, name: clean });
-    return { slot: { ...slot, claimedCount: count, status, updatedAt: now }, claim };
+    return { slot: { ...slot, claimedCount: count, status, updatedAt: now }, claim, updated: false };
   });
 }
 

@@ -1,7 +1,8 @@
 /** Slack interaction handling: buttons, forms and the /overtime command. */
 import { after } from "next/server";
 import {
-  afterCancel, afterClaim, afterEdit, afterSwap, afterWithdraw, payRunLinks, postSlotToChannel, publishHome, refreshSlot, syncTeamCalendar,
+  afterCancel, afterClaim, afterEdit, afterSwap, afterWithdraw, cancelFreelancerInvite, payRunLinks, postSlotToChannel, publishHome, refreshSlot,
+  sendFreelancerInvite, syncTeamCalendar,
 } from "./actions";
 import { report } from "./report";
 import { isLateWithdrawal, money, offersEarlyFinish, parseFee, type ClaimRefusal } from "./rules";
@@ -304,15 +305,23 @@ async function handleViewSubmission(p: Payload): Promise<Record<string, unknown>
   if (view.callback_id === "assign_form" || view.callback_id === "unassign_form") {
     const assigning = view.callback_id === "assign_form";
     try {
-      const { slot, claim } = assigning
-        ? await assignFreelancer(view.private_metadata, view.state.values.name?.v?.value ?? "", actor)
-        : await removeFreelancer(view.state.values.who?.v?.selected_option?.value ?? "", actor);
+      const r = assigning
+        ? await assignFreelancer(view.private_metadata, view.state.values.name?.v?.value ?? "", actor, Date.now(), view.state.values.email?.v?.value ?? "")
+        : { ...(await removeFreelancer(view.state.values.who?.v?.selected_option?.value ?? "", actor)), updated: false };
+      const { slot, claim } = r;
       after(async () => {
-        await refreshSlot(slot.id);
-        await dm(actor.userId, assigning
-          ? `:busts_in_silhouette: ${claim.name} (freelancer) is down for *${slotLine(slot)}*. They won't get Slack reminders, so please make sure they know, and they're paid outside the overtime payroll.`
-          : `${claim.name} is off *${slotLine(slot)}*, and the space is open again.`,
-        ).catch((e) => report(e, "dm.freelancer_confirm", { slotId: slot.id }));
+        if (!r.updated) await refreshSlot(slot.id);
+        let text: string;
+        if (!assigning) {
+          await cancelFreelancerInvite(claim);
+          text = `${claim.name} is off *${slotLine(slot)}*, and the space is open again.${claim.email ? " Their calendar invite has been cancelled." : ""}`;
+        } else if (claim.email) {
+          const sent = await sendFreelancerInvite(slot, claim, actor.userId);
+          text = `:busts_in_silhouette: ${claim.name} (freelancer) is down for *${slotLine(slot)}*.${sent ? ` A calendar invite has gone to ${claim.email} from your calendar.` : ""} They're paid outside the overtime payroll.`;
+        } else {
+          text = `:busts_in_silhouette: ${claim.name} (freelancer) is down for *${slotLine(slot)}*. They won't get reminders or an invite, so please make sure they know (or assign them again with their email to send one). They're paid outside the overtime payroll.`;
+        }
+        await dm(actor.userId, text).catch((e) => report(e, "dm.freelancer_confirm", { slotId: slot.id }));
       });
       return null;
     } catch (e) {
