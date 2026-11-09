@@ -12,3 +12,5 @@ What this is: the FOMO London team's overtime tracker, Slack-first. Designed wit
 
 External calls: Slack, Google Calendar, Firestore. No Rentman, HubSpot or Xero calls; keep it that way unless Jamie decides otherwise (rule 4).
 Before saying done: `npm test`, `npm run test:db`, `npm run lint`, `npm run build`.
+
+Every PR description has a `## Team note` section (see `.github/pull_request_template.md`). It is what the team reads in Slack #whats-new (repo FOMORentals/fomo-whats-new): a headline, what changed, what they do differently, a screenshot saved under `whats-new/` when the change is visible, and a link or command to try it. Few words, plain English. Write `None` when the team won't notice the change.
