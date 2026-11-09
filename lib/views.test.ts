@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { homeView, offerMessage, payRunBlocks, readSlotForm, roundupMessage, routeModal, slotLine, slotMessage, slotModal } from "./views";
-import { teamEventBody } from "./calendar";
+import { inviteBody, teamEventBody } from "./calendar";
 import { slotInstants, londonToUtc } from "./time";
 import type { Claim, Slot } from "./types";
 
@@ -144,4 +144,13 @@ test("freelancers show by name, and the menu offers assign/remove", () => {
   assert.match(open, /unassign:s1/);
   const full = JSON.stringify(slotMessage({ ...s, claimedCount: 1, status: "full" }, [fl], "https://x").blocks);
   assert.doesNotMatch(full, /"assign:s1"/);
+});
+
+test("freelancer invite: guest is the freelancer, no fee shown, from the assigner", () => {
+  const fl: Claim = { ...claim, id: "s1_fl_eden", name: "Eden", email: "eden@example.com", freelancer: true, invitedBy: "louis@fomorentals.co.uk" };
+  const b = inviteBody(s, fl, "Louis");
+  assert.deepEqual(b.attendees, [{ email: "eden@example.com", displayName: "Eden" }]);
+  assert.doesNotMatch(b.description, /£50/);
+  assert.match(b.description, /Booked by Louis/);
+  assert.equal(b.summary, "FOMO overtime: Early opening · Andrew Berekdar");
 });

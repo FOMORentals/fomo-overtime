@@ -143,6 +143,20 @@ test("database rules", { skip: !enabled && "set FIRESTORE_EMULATOR_HOST to run" 
     assert.equal(fresh?.status, "open");
   });
 
+  await t.test("freelancer email: optional, validated, and can be added later", async () => {
+    const s = await store.createSlot({ ...base, date: "2026-11-19" }, louis, now);
+    await assert.rejects(store.assignFreelancer(s.id, "Eden", louis, now, "not-an-email"), /doesn't look right/);
+    const a = await store.assignFreelancer(s.id, "Eden", louis, now);
+    assert.equal(a.claim.invitedBy, null);
+    const b = await store.assignFreelancer(s.id, "Eden", louis, now, "Eden@Example.com");
+    assert.equal(b.updated, true);
+    const stored = await store.getClaim(a.claim.id);
+    assert.equal(stored?.email, "eden@example.com");
+    assert.equal(stored?.invitedBy, louis.email);
+    assert.equal((await store.getSlot(s.id))?.claimedCount, 1, "adding the email doesn't take another space");
+    await assert.rejects(store.assignFreelancer(s.id, "Eden", louis, now, "eden@example.com"), /already on this slot/);
+  });
+
   await t.test("every change is in the audit log", async () => {
     const snap = await db().collection("ot_audit").get();
     const actions = new Set(snap.docs.map((d) => d.data().action));

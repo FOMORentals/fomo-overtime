@@ -4,11 +4,11 @@
  * is tried separately; a failure is reported to Sentry and recorded on the claim, never swallowed.
  */
 import { adminLink } from "./admin-link";
-import { deleteEvent, deleteTeamEvent, isBusy, teamCalendarId, upsertEvent, upsertTeamEvent } from "./calendar";
+import { deleteEvent, deleteInvite, deleteTeamEvent, isBusy, teamCalendarId, upsertEvent, upsertInvite, upsertTeamEvent } from "./calendar";
 import { appUrl, report } from "./report";
 import { calendarWindow, timeInsteadLabel } from "./rules";
 import { dm, dmEmail, overtimeChannel, slack } from "./slack";
-import { OPS_ALERT_EMAIL } from "./staff";
+import { OPS_ALERT_EMAIL, staffByEmail } from "./staff";
 import { claimsForSlot, claimsForUser, getSlot, liveSlots, updateClaimFields, updateSlotFields, type Actor } from "./store";
 import type { Claim, Slot } from "./types";
 import { claimConfirmation, homeView, slotLine, slotMessage } from "./views";
@@ -110,7 +110,10 @@ export async function afterWithdraw(slot: Slot, claim: Claim, late: boolean, act
 export async function afterEdit(slot: Slot, claims: Claim[], actor: Actor) {
   await refreshSlot(slot.id);
   for (const c of claims) {
-    if (c.freelancer) continue; // not on Slack or our calendars
+    if (c.freelancer) {
+      if (c.email && c.invitedBy) await sendFreelancerInvite(slot, c, actor.userId);
+      continue; // not on Slack
+    }
     await syncCalendar(slot, c);
     if (c.userId !== actor.userId)
       await safe("dm.slot_changed", () =>
@@ -122,10 +125,36 @@ export async function afterEdit(slot: Slot, claims: Claim[], actor: Actor) {
 export async function afterCancel(slot: Slot, claims: Claim[], actor: Actor) {
   await refreshSlot(slot.id);
   for (const c of claims) {
-    if (c.freelancer) continue;
+    if (c.freelancer) {
+      await cancelFreelancerInvite(c);
+      continue;
+    }
     await removeCalendar(c);
     await safe("dm.slot_cancelled", () => dm(c.userId, `:x: ${actor.name} cancelled *${slotLine(slot)}*. It's been taken off your calendar, and nothing is owed for it.`));
     await safe("home.publish", () => publishHome(c.userId));
+  }
+}
+
+/** Freelancer invite: Google emails it from the assigner's calendar. A failure is reported and the assigner told. */
+export async function sendFreelancerInvite(slot: Slot, claim: Claim, tellUserId: string): Promise<boolean> {
+  try {
+    const id = await upsertInvite(slot, claim, staffByEmail(claim.invitedBy)?.name ?? "FOMO");
+    await updateClaimFields(claim.id, { calendarEventId: id, calendarError: null });
+    return true;
+  } catch (err) {
+    report(err, "calendar.freelancer_invite", { claimId: claim.id });
+    await updateClaimFields(claim.id, { calendarError: String((err as Error).message ?? err).slice(0, 300) }).catch((e) => report(e, "claim.update"));
+    await safe("dm.invite_failed", () => dm(tellUserId, `:warning: I couldn't send ${claim.name} a calendar invite for *${slotLine(slot)}*. They're still booked on it, so please let them know directly.`));
+    return false;
+  }
+}
+
+export async function cancelFreelancerInvite(claim: Claim) {
+  if (!claim.email || !claim.invitedBy) return;
+  try {
+    await deleteInvite(claim);
+  } catch (err) {
+    report(err, "calendar.freelancer_uninvite", { claimId: claim.id });
   }
 }
 

@@ -191,6 +191,14 @@ export function assignModal(s: Slot): Block {
         element: { type: "plain_text_input", action_id: "v", placeholder: { type: "plain_text", text: "e.g. Eden" } },
         hint: { type: "plain_text", text: "Shows on the post and the team calendar. Freelancers are paid outside the overtime payroll, so this isn't counted at month end." },
       },
+      {
+        type: "input",
+        block_id: "email",
+        optional: true,
+        label: { type: "plain_text", text: "Their email (for a calendar invite)" },
+        element: { type: "email_text_input", action_id: "v", placeholder: { type: "plain_text", text: "eden@example.com" } },
+        hint: { type: "plain_text", text: "Optional. Google sends them an invite from your calendar, plus updates if the slot changes or is cancelled." },
+      },
     ],
   };
 }
