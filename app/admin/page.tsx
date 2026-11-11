@@ -3,9 +3,9 @@ import { adminEmail } from "@/lib/admin-session";
 import { COL, db } from "@/lib/firestore";
 import { money, pairedSlotWarnings, totalsByPerson } from "@/lib/rules";
 import { staffByEmail } from "@/lib/staff";
-import { claimsInMonth, getPayRun, liveSlots, setClaimFlag, type Actor } from "@/lib/store";
+import { claimsInMonth, getPayRun, getSlot, liveSlots, setClaimFlag, type Actor } from "@/lib/store";
 import { finalFriday, londonParts, monthLabel, prettyDate } from "@/lib/time";
-import { ClaimsList } from "./claims-list";
+import { ClaimsList, type FreelancerFees } from "./claims-list";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +63,12 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
     getPayRun(month),
     db().collection(COL.meta).doc("tick").get(),
   ]);
+  // Freelancers are £0 on payroll (they invoice FOMO), but Sam wants to see what they're owed (11 Nov).
+  const flClaims = all.filter((c) => c.freelancer && (c.status === "confirmed" || c.status === "completed"));
+  const flSlots = await Promise.all(flClaims.map((c) => getSlot(c.slotId)));
+  const fees: FreelancerFees = Object.fromEntries(flClaims.map((c, i) => [c.id, flSlots[i]?.feePence ?? 0]));
+  const flTotals = new Map<string, number>();
+  for (const c of flClaims) flTotals.set(c.name, (flTotals.get(c.name) ?? 0) + (fees[c.id] ?? 0));
   const counted = all.filter((c) => c.status === "completed" || (c.status === "confirmed" && c.endAt <= now));
   const payable = counted.filter((c) => !c.flagged && c.amountPence > 0);
   const totals = totalsByPerson(payable);
@@ -105,6 +111,12 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
           </tbody>
         </table>
       </div>
+      {flTotals.size > 0 && (
+        <p className="muted">
+          Freelancers (they invoice FOMO; not in payroll):{" "}
+          {[...flTotals].map(([name, pence]) => `${name} ${money(pence)}`).join(", ")}.
+        </p>
+      )}
 
       {warnings.length > 0 && (
         <>
@@ -125,7 +137,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
       )}
 
       <h2>Claims this month</h2>
-      <ClaimsList claims={all} now={now} flagAction={flagAction} unflagAction={unflagAction} />
+      <ClaimsList claims={all} now={now} flagAction={flagAction} unflagAction={unflagAction} fees={fees} />
 
       <h2>Upcoming slots</h2>
       <div className="scroll">

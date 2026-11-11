@@ -4,6 +4,8 @@ import { londonParts } from "@/lib/time";
 import type { Claim } from "@/lib/types";
 
 type FormAction = ((form: FormData) => Promise<void>) | string;
+/** Freelancer claim id → the slot fee they invoice FOMO for (kept out of payroll). */
+export type FreelancerFees = Record<string, number>;
 
 const DAY = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: "Europe/London" });
 const DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "Europe/London" });
@@ -28,7 +30,7 @@ export function groupOf(c: Claim, now: number): ClaimGroup {
   return "upcoming";
 }
 
-function Row({ c, now, flagAction, unflagAction }: { c: Claim; now: number; flagAction: FormAction; unflagAction: FormAction }) {
+function Row({ c, now, flagAction, unflagAction, fees }: { c: Claim; now: number; flagAction: FormAction; unflagAction: FormAction; fees: FreelancerFees }) {
   const { kind, client } = splitLabel(c.slotLabel);
   const g = groupOf(c, now);
   const timeInstead = c.route === "early_finish";
@@ -49,7 +51,12 @@ function Row({ c, now, flagAction, unflagAction }: { c: Claim; now: number; flag
         <span className="client">{client}</span>
       </div>
       <div className="amount">
-        {timeInstead ? <span className="tag calm">Time instead</span> : c.amountPence > 0 ? money(c.amountPence) : <span className="muted">Free</span>}
+        {c.freelancer ? (
+          <span className="fl-fee">
+            {fees[c.id] ? <span>{money(fees[c.id])}</span> : null}
+            <span className="tag calm" title="Freelancer: invoices FOMO, not in payroll">Invoices</span>
+          </span>
+        ) : timeInstead ? <span className="tag calm">Time instead</span> : c.amountPence > 0 ? money(c.amountPence) : <span className="muted">Free</span>}
       </div>
       <div className="act">
         {g === "flagged" && <div className="flag-reason">Left out of pay: {c.flagReason}</div>}
@@ -77,7 +84,7 @@ function Row({ c, now, flagAction, unflagAction }: { c: Claim; now: number; flag
 }
 
 function Group({ title, note, claims, ...rest }: {
-  title: string; note?: string; claims: Claim[]; now: number; flagAction: FormAction; unflagAction: FormAction;
+  title: string; note?: string; claims: Claim[]; now: number; flagAction: FormAction; unflagAction: FormAction; fees: FreelancerFees;
 }) {
   if (!claims.length) return null;
   return (
@@ -88,14 +95,14 @@ function Group({ title, note, claims, ...rest }: {
   );
 }
 
-export function ClaimsList({ claims, now, flagAction, unflagAction }: {
-  claims: Claim[]; now: number; flagAction: FormAction; unflagAction: FormAction;
+export function ClaimsList({ claims, now, flagAction, unflagAction, fees = {} }: {
+  claims: Claim[]; now: number; flagAction: FormAction; unflagAction: FormAction; fees?: FreelancerFees;
 }) {
   const by = (g: ClaimGroup) => claims.filter((c) => groupOf(c, now) === g).sort((a, b) => a.startAt - b.startAt);
   const due = by("due");
   const dueTotal = due.filter((c) => c.amountPence > 0).reduce((t, c) => t + c.amountPence, 0);
   const dropped = by("dropped");
-  const props = { now, flagAction, unflagAction };
+  const props = { now, flagAction, unflagAction, fees };
   if (!claims.length) return <p className="muted">No claims this month.</p>;
   return (
     <div>
