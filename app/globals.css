@@ -59,3 +59,4 @@ details.dropped > summary { cursor: pointer; color: var(--muted); font-size: 13p
   .claim { grid-template-columns: 1fr auto; grid-template-areas: "when amount" "who who" "what what" "act act"; gap: 4px 12px; }
   .when { grid-area: when; flex-direction: row; gap: 6px; } .amount { grid-area: amount; } .who { grid-area: who; } .what { grid-area: what; } .act { grid-area: act; justify-content: flex-start; } .flagger summary { padding-left: 0; } .flagger form { left: 0; right: auto; }
 }
+.fl-fee { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
