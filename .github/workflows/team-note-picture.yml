@@ -1,0 +1,40 @@
+# Every team note goes to Slack #whats-new with a picture (Jamie, 9 and 12 Nov 2026).
+# This check fails when the PR's "## Team note" is filled in but the PR adds no picture under whats-new/.
+# Same rules as fomo-whats-new (lib/note.ts, lib/github.ts prPictures). Copied into each FOMO app repo.
+name: Team note picture
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  picture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const NONE = /^(none|n\/a|no|-|nothing|behind the scenes)\.?$/i;
+            const body = (context.payload.pull_request.body || "").replace(/<!--[\s\S]*?-->/g, "").replace(/\r/g, "");
+            const lines = body.split("\n");
+            const start = lines.findIndex((l) => /^#{1,6}\s*team note\b/i.test(l.trim()));
+            if (start < 0) return core.notice("No Team note section: nothing goes to #whats-new.");
+            const rest = lines.slice(start + 1);
+            const end = rest.findIndex((l) => /^#{1,6}\s/.test(l.trim()));
+            const section = (end < 0 ? rest : rest.slice(0, end)).join("\n").trim();
+            const clean = (s) => s.replace(/\*\*/g, "").trim();
+            if (!section || NONE.test(clean(section))) return core.notice("Team note is None: no picture needed.");
+            const head = section.split("\n").map((l) => clean(l.replace(/^\s*[-*]\s+/, ""))).find((l) => /^headline\s*:/i.test(l));
+            const headline = head ? head.replace(/^headline\s*:/i, "").trim() : "";
+            if (!headline || NONE.test(headline) || /^\(.*\)$/.test(headline)) return core.notice("Team note has no headline: nothing goes to #whats-new.");
+            const files = await github.paginate(github.rest.pulls.listFiles, { ...context.repo, pull_number: context.payload.pull_request.number, per_page: 100 });
+            const pics = files.filter((f) => f.status !== "removed" && /^whats-new\/[\w./-]+\.(png|jpe?g|gif|webp)$/i.test(f.filename) && !f.filename.includes(".."));
+            if (pics.length) return core.notice(`Picture for #whats-new: ${pics[0].filename}`);
+            core.setFailed(
+              "This change has a Team note but no picture. The team reads it in #whats-new and every note needs one.\n" +
+              "Add a .png to this PR under whats-new/ (e.g. whats-new/YYYY-MM-DD-short-name.png) and put its path on the Screenshot line.\n" +
+              "Use a screenshot of the change. If there is nothing to screenshot, make a mock-up or a before/after or workflow diagram " +
+              "(HTML rendered with Playwright at 1200x675 works; label it Mock-up). \"to follow\" and \"None\" are not accepted.\n" +
+              "Only if the team won't notice the change at all, write None for the whole Team note."
+            );

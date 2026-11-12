@@ -7,7 +7,7 @@
 **Headline:** 
 **What changed:** 
 **What you do:** 
-**Screenshot:** (a screenshot, mock-up or diagram of the change, saved as a .png under whats-new/ in this repo. Jamie wants one wherever possible)
+**Screenshot:** (required: add a .png of the change to this PR under whats-new/ and put its path here. A screenshot, or a mock-up or diagram when there is nothing to screenshot. "to follow" and "None" are not accepted: the Team note picture check fails without one)
 **Try it:** (optional: a link or a Slack command)
 
 ## Test plan
