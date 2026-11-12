@@ -3,18 +3,18 @@
  * Calls no Rentman, HubSpot or Xero APIs: only Firestore, Slack and Google Calendar.
  * Each nudge fires once: its timestamp is stored after sending, so re-runs are safe.
  */
-import { payRunLinks, permalink, refreshSlot, repostSlot, syncTeamCalendar } from "./actions";
+import { payRunLinks, permalink, refreshSlot, refreshSlotMessage, repostSlot, syncTeamCalendar } from "./actions";
 import { teamCalendarId } from "./calendar";
 import { report } from "./report";
 import { claimsToComplete, dueNudges, payRunDue, payableClaims, roundupDue, slotsInWeek } from "./rules";
 import { dm, dmEmail, overtimeChannel, slack } from "./slack";
 import { APPROVER_EMAIL, OPS_ALERT_EMAIL } from "./staff";
 import {
-  completeClaim, completeSlotIfDone, confirmedClaims, createPayRun, getMeta, getPayRun, liveSlots, setMeta, unpaidCompletedClaims,
+  completeClaim, completeSlotIfDone, confirmedClaims, recentSlots, createPayRun, getMeta, getPayRun, liveSlots, setMeta, unpaidCompletedClaims,
   updateClaimFields, updateSlotFields,
 } from "./store";
 import { summaryDay } from "./time";
-import { payRunBlocks, roundupMessage, slotLine } from "./views";
+import { POST_LAYOUT, payRunBlocks, roundupMessage, slotLine } from "./views";
 
 export interface TickResult {
   completed: number;
@@ -122,6 +122,21 @@ export async function runTick(deadline: number, now = Date.now()): Promise<TickR
       if (timeUp()) break;
       await attempt("team_calendar", () => syncTeamCalendar(s.id), { slotId: s.id });
     }
+  }
+
+  // 6. After the post layout changes, rebuild every upcoming or recent post once so old posts match new ones.
+  if (!timeUp() && (await getMeta("post_layout"))?.version !== POST_LAYOUT) {
+    let done = true;
+    for (const s of (await recentSlots(now)).filter((s) => s.messageTs)) {
+      if (timeUp()) {
+        done = false;
+        break;
+      }
+      const before = out.failures;
+      await attempt("post_layout", () => refreshSlotMessage(s.id), { slotId: s.id });
+      if (out.failures > before) done = false;
+    }
+    if (done) await setMeta("post_layout", { version: POST_LAYOUT, at: now });
   }
 
   await setMeta("tick", { lastRunAt: now, lastFailures: out.failures, lastIncomplete: out.incomplete, ...(out.failures === 0 ? { lastSuccessAt: now } : {}) });

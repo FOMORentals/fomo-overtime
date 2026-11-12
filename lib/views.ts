@@ -26,10 +26,11 @@ export function slotMessage(s: Slot, claims: Claim[], appUrl: string): { text: s
   const head = s.status === "cancelled" ? `~${slotLine(s)}~  *CANCELLED*` : `*${slotLine(s)}*`;
   const lines: string[] = [head];
   if (s.details) lines.push(esc(s.details));
-  if (offersEarlyFinish(s) && s.status !== "cancelled")
-    lines.push(s.leaveEarlyAt ? `:sunrise: Option to work the time instead of being paid, and *leave at ${s.leaveEarlyAt}*.` : ":sunrise: Option to work the time instead of being paid.");
-  const who = active.map((c) => `<@${c.userId}>${c.route === "early_finish" ? ` (${timeInsteadLabel(s)})` : ""}`).join(", ");
+  // Only while someone can still pick it: on a taken or finished slot it read as if the claim had changed (Louis, 9 Nov).
   const left = spacesLeft(s);
+  if (offersEarlyFinish(s) && !closed && left > 0)
+    lines.push(s.leaveEarlyAt ? `:sunrise: Option to work the time instead of being paid, and *leave at ${s.leaveEarlyAt}*.` : ":sunrise: Option to work the time instead of being paid.");
+  const who = active.map((c) => `${c.freelancer ? `${esc(c.name)} (freelancer)` : `<@${c.userId}>`}${c.route === "early_finish" ? ` (${timeInsteadLabel(s)})` : ""}`).join(", ");
   let status: string;
   if (s.status === "cancelled") status = "Cancelled";
   else if (s.status === "completed") status = active.length ? `Done: ${who}` : "Done, nobody claimed it";
@@ -52,6 +53,8 @@ export function slotMessage(s: Slot, claims: Claim[], appUrl: string): { text: s
       action_id: "manage",
       options: [
         { text: { type: "plain_text", text: "Edit" }, value: `edit:${s.id}` },
+        ...(left > 0 ? [{ text: { type: "plain_text", text: "Assign to a freelancer" }, value: `assign:${s.id}` }] : []),
+        ...(active.some((c) => c.freelancer) ? [{ text: { type: "plain_text", text: "Remove freelancer" }, value: `unassign:${s.id}` }] : []),
         { text: { type: "plain_text", text: "Cancel slot" }, value: `cancel:${s.id}` },
       ],
     });
@@ -169,6 +172,68 @@ export function claimConfirmation(s: Slot, c: Claim, calendarBusy: boolean): str
   if (calendarBusy) parts.push(":warning: Heads up: your calendar already has something else at that time.");
   parts.push("Can't make it? Press *Give away* on the post to hand it to a colleague, or *Withdraw*. Withdrawing up to 48 hours before is fine; after that Sam gets told.");
   return parts.join("\n");
+}
+
+/**
+ * Bump this whenever the buttons or menu on a slot post change. The next cron run then
+ * rebuilds every upcoming post, so older posts get the new options too.
+ */
+export const POST_LAYOUT = 3;
+
+/** Put a freelancer (not on Slack) on a slot. */
+export function assignModal(s: Slot): Block {
+  return {
+    type: "modal",
+    callback_id: "assign_form",
+    private_metadata: s.id,
+    title: { type: "plain_text", text: "Assign to a freelancer" },
+    submit: { type: "plain_text", text: "Assign" },
+    close: { type: "plain_text", text: "Back" },
+    blocks: [
+      { type: "section", text: { type: "mrkdwn", text: `*${slotLine(s)}*` } },
+      {
+        type: "input",
+        block_id: "name",
+        label: { type: "plain_text", text: "Freelancer's name" },
+        element: { type: "plain_text_input", action_id: "v", placeholder: { type: "plain_text", text: "e.g. Eden" } },
+        hint: { type: "plain_text", text: "Shows on the post and the team calendar. Freelancers are paid outside the overtime payroll, so this isn't counted at month end." },
+      },
+      {
+        type: "input",
+        block_id: "email",
+        optional: true,
+        label: { type: "plain_text", text: "Their email (for a calendar invite)" },
+        element: { type: "email_text_input", action_id: "v", placeholder: { type: "plain_text", text: "eden@example.com" } },
+        hint: { type: "plain_text", text: "Optional. Google sends them an invite from your calendar, plus updates if the slot changes or is cancelled." },
+      },
+    ],
+  };
+}
+
+/** Choose which freelancer to take off a slot. */
+export function unassignModal(s: Slot, freelancers: Claim[]): Block {
+  return {
+    type: "modal",
+    callback_id: "unassign_form",
+    private_metadata: s.id,
+    title: { type: "plain_text", text: "Remove freelancer" },
+    submit: { type: "plain_text", text: "Remove" },
+    close: { type: "plain_text", text: "Back" },
+    blocks: [
+      { type: "section", text: { type: "mrkdwn", text: `*${slotLine(s)}*` } },
+      {
+        type: "input",
+        block_id: "who",
+        label: { type: "plain_text", text: "Who's no longer doing it?" },
+        element: {
+          type: "static_select",
+          action_id: "v",
+          options: freelancers.map((c) => opt(c.name.slice(0, 70), c.id)),
+          ...(freelancers.length === 1 ? { initial_option: opt(freelancers[0].name.slice(0, 70), freelancers[0].id) } : {}),
+        },
+      },
+    ],
+  };
 }
 
 /** Give away: pick the colleague. */

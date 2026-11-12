@@ -17,3 +17,46 @@ button, .btn { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px so
 .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .scroll { overflow-x: auto; }
 input[type=text] { font: inherit; font-size: 13px; padding: 3px 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); border-radius: 6px; width: 140px; }
+
+/* Claims list (admin) */
+:root { --card: #fff; --soft: #f1f0ec; --good-bg: #e7f5ec; --bad-bg: #fdecec; --calm-bg: #eef2fb; --calm: #3157a8; }
+@media (prefers-color-scheme: dark) { :root { --card: #1c1c1c; --soft: #242424; --good-bg: #13301e; --bad-bg: #3a1717; --calm-bg: #1b2540; --calm: #9db6ee; } }
+.group { margin: 0 0 20px; }
+.group h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
+.group h3 .count { display: inline-block; min-width: 20px; padding: 0 6px; margin-left: 4px; border-radius: 99px; background: var(--soft); color: var(--fg); text-align: center; letter-spacing: 0; }
+.group h3 .muted { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.claims { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.claim { display: grid; grid-template-columns: 110px 150px 1fr 110px 190px; gap: 12px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); }
+.claim:first-child { border-top: 0; }
+.claim.dropped { opacity: .6; }
+.claim.flagged { background: var(--bad-bg); }
+.when { display: flex; flex-direction: column; line-height: 1.25; }
+.when .day { font-weight: 600; font-size: 14px; }
+.when .time { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.who { display: flex; gap: 8px; align-items: center; }
+.avatar { width: 28px; height: 28px; flex: none; border-radius: 50%; background: var(--soft); display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+.what { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.what .kind { font-weight: 500; }
+.what .client { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.amount { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.act { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; text-align: right; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px; font-weight: 500; background: var(--soft); white-space: nowrap; }
+.tag.good { background: var(--good-bg); color: var(--ok); }
+.tag.calm { background: var(--calm-bg); color: var(--calm); }
+.flag-reason { font-size: 12px; color: var(--bad); }
+.flagger { position: relative; }
+.flagger summary { list-style: none; cursor: pointer; font-size: 12px; color: var(--muted); padding: 4px 8px; border-radius: 6px; }
+.flagger summary::-webkit-details-marker { display: none; }
+.flagger summary:hover { background: var(--soft); color: var(--fg); }
+.flagger[open] summary { color: var(--fg); }
+.flagger form { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; display: flex; gap: 6px; padding: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); white-space: nowrap; }
+.flagger form button { white-space: nowrap; }
+.flagger input[type=text] { width: 180px; }
+.claim { position: relative; }
+button.danger { border-color: var(--bad); color: var(--bad); }
+details.dropped > summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+@media (max-width: 720px) {
+  .claim { grid-template-columns: 1fr auto; grid-template-areas: "when amount" "who who" "what what" "act act"; gap: 4px 12px; }
+  .when { grid-area: when; flex-direction: row; gap: 6px; } .amount { grid-area: amount; } .who { grid-area: who; } .what { grid-area: what; } .act { grid-area: act; justify-content: flex-start; } .flagger summary { padding-left: 0; } .flagger form { left: 0; right: auto; }
+}
+.fl-fee { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }

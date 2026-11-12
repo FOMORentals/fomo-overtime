@@ -107,7 +107,7 @@ const BASIL = "10";
 /** Pure: what the slot looks like on the team calendar. */
 export function teamEventBody(slot: Slot, claims: Claim[], appUrl: string) {
   const active = claims.filter((c) => c.status === "confirmed" || c.status === "completed");
-  const names = active.map((c) => c.name + (c.route === "early_finish" ? (slot.leaveEarlyAt ? ` (leaves ${slot.leaveEarlyAt})` : " (time instead)") : ""));
+  const names = active.map((c) => c.name + (c.freelancer ? " (freelancer)" : "") + (c.route === "early_finish" ? (slot.leaveEarlyAt ? ` (leaves ${slot.leaveEarlyAt})` : " (time instead)") : ""));
   const open = Math.max(0, slot.spaces - active.length);
   const what = `${slot.kind}${slot.title ? ` · ${slot.title}` : ""}`;
   const prefix = open > 0 && slot.status !== "completed" ? (slot.spaces > 1 ? `OPEN (${open} of ${slot.spaces})` : "OPEN") : "";
@@ -153,6 +153,58 @@ export async function deleteTeamEvent(slotId: string): Promise<void> {
   const client = clientFor(teamCalendarOwner());
   try {
     await client.request({ url: `${BASE}/calendars/${encodeURIComponent(cal)}/events/${eventIdFor(`team_${slotId}`)}`, method: "DELETE" });
+  } catch (err) {
+    const s = status(err);
+    if (s === 404 || s === 410) return;
+    throw err;
+  }
+}
+
+// ---------- freelancer invites ----------
+// Freelancers aren't on our Workspace, so the invite comes from the calendar of whoever assigned
+// them (claim.invitedBy) with the freelancer as a guest. Google emails them the invite, changes and
+// cancellation (sendUpdates=all).
+
+export function inviteBody(slot: Slot, claim: Claim, organizerName: string) {
+  return {
+    summary: `FOMO overtime: ${slot.kind}${slot.title ? ` · ${slot.title}` : ""}`,
+    description: [
+      slotLine(slot).replace(/\*/g, "").replace(/ · (£\d+(\.\d\d)?|Free)/, ""),
+      slot.details,
+      `Booked by ${organizerName} at FOMO. Questions or can't make it? Reply to ${organizerName}.`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    location: process.env.OVERTIME_LOCATION || "FOMO Rentals",
+    start: { dateTime: new Date(slot.startAt).toISOString(), timeZone: "Europe/London" },
+    end: { dateTime: new Date(slot.endAt).toISOString(), timeZone: "Europe/London" },
+    status: "confirmed",
+    attendees: [{ email: claim.email, displayName: claim.name }],
+    guestsCanModify: false,
+    guestsCanInviteOthers: false,
+    reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 60 }] },
+  };
+}
+
+export async function upsertInvite(slot: Slot, claim: Claim, organizerName: string): Promise<string> {
+  if (!claim.email || !claim.invitedBy) throw new Error("freelancer invite needs an email and an organiser");
+  const client = clientFor(claim.invitedBy);
+  const id = eventIdFor(claim.id);
+  const body = inviteBody(slot, claim, organizerName);
+  try {
+    await client.request({ url: `${BASE}/calendars/primary/events/${id}?sendUpdates=all`, method: "PUT", data: body });
+  } catch (err) {
+    if (status(err) !== 404) throw err;
+    await client.request({ url: `${BASE}/calendars/primary/events?sendUpdates=all`, method: "POST", data: { ...body, id } });
+  }
+  return id;
+}
+
+export async function deleteInvite(claim: Pick<Claim, "id" | "invitedBy">): Promise<void> {
+  if (!claim.invitedBy) return;
+  const client = clientFor(claim.invitedBy);
+  try {
+    await client.request({ url: `${BASE}/calendars/primary/events/${eventIdFor(claim.id)}?sendUpdates=all`, method: "DELETE" });
   } catch (err) {
     const s = status(err);
     if (s === 404 || s === 410) return;

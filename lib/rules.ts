@@ -140,7 +140,7 @@ export function dueNudges(slots: Slot[], claims: Claim[], now: number): Nudge[] 
   }
   const bySlot = new Map(slots.map((s) => [s.id, s]));
   for (const c of claims) {
-    if (c.status !== "confirmed" || c.startAt <= now) continue;
+    if (c.status !== "confirmed" || c.startAt <= now || c.freelancer) continue;
     const slot = bySlot.get(c.slotId);
     if (!slot) continue;
     const dAt = dayBeforeReminderAt(slot.date);
@@ -161,7 +161,7 @@ export function claimsToComplete(claims: Claim[], now: number): Claim[] {
 
 /** Earnings ready for the next pay run: completed, not flagged, not already paid, more than £0. */
 export function payableClaims(claims: Claim[]): Claim[] {
-  return claims.filter((c) => c.status === "completed" && !c.flagged && !c.paidRunId && c.amountPence > 0);
+  return claims.filter((c) => c.status === "completed" && !c.flagged && !c.paidRunId && c.amountPence > 0 && !c.freelancer);
 }
 
 /** Pairs of paid slots one person did within an hour of each other ("not compounded"). */

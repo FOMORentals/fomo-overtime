@@ -66,6 +66,10 @@ export interface Claim {
   offerTo?: string | null;
   offerToName?: string | null;
   offerAt?: number | null;
+  /** A freelancer (not on Slack) assigned by the poster or an admin. Paid outside payroll: no DMs, reminders or pay run. */
+  freelancer?: boolean;
+  /** Freelancer invites: the staff member whose calendar sends the Google invite (whoever assigned them). */
+  invitedBy?: string | null;
   /** Set on the old claim when someone else took it over. */
   swappedTo?: string | null;
 }
