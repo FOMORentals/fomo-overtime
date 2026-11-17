@@ -1,0 +1,222 @@
+# App request build: builds a change the team asked for in Slack #app-requests (Jamie, 17 Nov 2026).
+# Started by the App requests app (repo FOMORentals/fomo-app-requests), which opens an issue here and
+# labels it "app-request". Claude Code makes the change on a branch, the repo's own checks run, a pull
+# request is opened, and the app DMs Sam (or Jamie) to approve. Nothing merges without that tap.
+#
+# Copied into each app repo where small fixes can be built. The only per-repo part is BUILD_ENV below.
+# Secrets (repo or organisation): CLAUDE_CODE_OAUTH_TOKEN (Jamie's subscription, from `claude setup-token`),
+# APP_REQUESTS_GH_TOKEN (pushes the branch and opens the pull request), APP_REQUESTS_CALLBACK_SECRET.
+name: App request build
+on:
+  issues:
+    types: [labeled]
+concurrency:
+  group: app-request-${{ github.event.issue.number }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+  issues: read
+  deployments: read
+jobs:
+  build:
+    if: github.event.label.name == 'app-request' && github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      ISSUE: ${{ github.event.issue.number }}
+      BRANCH: app-request/${{ github.event.issue.number }}
+      APP_URL: https://fomo-app-requests.vercel.app
+      # ---- per repo: build-time placeholders so `npm run build` works with no real secrets ----
+      BUILD_ENV: |
+        NO_PLACEHOLDERS_NEEDED=1
+      # ---- end per repo ----
+    steps:
+      - name: Read the request (only issues opened by the App requests app)
+        id: req
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            // The app opens these issues with Jamie's token, so they are his. Anything else is ignored.
+            if (issue.user.login.toLowerCase() !== "fomorentals") return core.setFailed(`Issue opened by ${issue.user.login}, not the App requests app.`);
+            const m = (issue.body || "").match(/<!--\s*ar-ref:\s*([A-Z0-9]+)\|([0-9.]+)\s*-->/);
+            if (!m) return core.setFailed("No ar-ref marker: not an App requests issue.");
+            core.setOutput("channel", m[1]);
+            core.setOutput("thread", m[2]);
+            // Only comments from the same account count (approver's "Ask for changes", "Try again").
+            // Anyone else's comment, on a public repo for instance, is never read.
+            const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: issue.number, per_page: 100 });
+            const ours = comments.filter((c) => c.user.login === issue.user.login).map((c) => `### ${c.created_at}\n${c.body}`);
+            const fs = require("fs");
+            const text = [`# ${issue.title}`, issue.body, ours.length ? "\n# Since then (newest last)\n" + ours.join("\n\n") : ""].join("\n\n");
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/request.md`, text);
+            core.setOutput("rebuild", ours.length ? "1" : "0");
+
+      # The checkout's own token can only read (permissions above), so nothing Claude runs can push.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Start from the existing branch when this is a rebuild
+        run: |
+          # fetch-depth 0 brought every branch, so a rebuild's branch is already here as origin/$BRANCH.
+          if git rev-parse --verify -q "origin/$BRANCH" >/dev/null; then git checkout -B "$BRANCH" "origin/$BRANCH"; else git checkout -B "$BRANCH"; fi
+          echo "BASE=$(git merge-base HEAD origin/${{ github.event.repository.default_branch }})" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: |
+          npm ci
+          npm install -g @anthropic-ai/claude-code
+          npm install --prefix "$RUNNER_TEMP/pw" playwright@1.49.1
+          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+          cat > "$RUNNER_TEMP/shot.js" <<'EOF'
+          const { chromium } = require(process.env.RUNNER_TEMP + "/pw/node_modules/playwright");
+          const path = require("path");
+          (async () => {
+            const b = await chromium.launch();
+            const p = await b.newPage({ viewport: { width: 1200, height: 675 }, deviceScaleFactor: 2 });
+            await p.goto("file://" + path.resolve(process.argv[2]));
+            await p.screenshot({ path: process.argv[3] });
+            await b.close();
+          })().catch((e) => { console.error(e); process.exit(1); });
+          EOF
+          printf '%s\n' "$BUILD_ENV" | grep -E '^[A-Z_][A-Z0-9_]*=' >> "$GITHUB_ENV"
+
+      - name: Build the change (Claude Code, up to 3 tries)
+        id: build
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          REBUILD: ${{ steps.req.outputs.rebuild }}
+        run: |
+          set -uo pipefail
+          mkdir -p .app-request
+          cat > "$RUNNER_TEMP/instructions.md" <<'EOF'
+          You are building a change that someone on the FOMO team asked for in Slack #app-requests.
+          The request, the questions and answers, and the FOMO engineering rules are in the file REQUEST_FILE.
+          Read it first, then this repo's CLAUDE.md and docs/DESIGN.md, and follow them.
+
+          Do exactly what the confirmed request asks, as a small, surgical change. Nothing extra.
+          If this is a rebuild, the "Since then" part says what to change; build on the work already on this branch.
+
+          STOP INSTEAD OF BUILDING if the change would touch any of: deal money, stage or close date; payments or invoices;
+          customer emails; Rentman writes or more Rentman calls; HubSpot or Xero writes; logins or who can see what;
+          a new scheduled job; deleting data; or it goes against a decision in docs/DESIGN.md or CLAUDE.md that the request
+          doesn't say Jamie has approved. Then write one plain-English sentence saying why to .app-request/STOP.md and finish.
+
+          Never edit anything under .github/, any .env file, or vercel.json. Don't add dependencies unless the request needs one.
+
+          When the change is made:
+          1. Run `npm run lint`, `npm test` and `npm run build` and fix what fails. Add or update a test for what you changed.
+          2. If the change alters how the app behaves in a way the design notes describe, or records a new decision, update
+             docs/DESIGN.md (create it if missing, short and plain). Otherwise leave it.
+          3. Write .app-request/CHANGED.txt: one or two plain-English sentences for Sam, saying what is different on screen
+             or in Slack. No code words.
+          4. Write .app-request/PR.md: first line is the pull request title (plain English, under 70 characters), then a blank
+             line, then the body with these sections, following .github/pull_request_template.md if the repo has one:
+             ## Summary (what changed and why, for Jamie)
+             ## Team note (Headline / What changed / What you do / Screenshot / Try it; or the single word None if the team won't notice)
+             ## Design notes (either "Updated docs/DESIGN.md: <what>" or "No decision changed: <one-line reason>")
+             ## Test plan
+          5. If the Team note is not None, make its picture: an HTML mock-up of the change at 1200x675, saved as
+             whats-new/YYYY-MM-DD-short-name.html (today's date), labelled "Mock-up" in a corner. It is turned into a .png
+             for you. Put whats-new/YYYY-MM-DD-short-name.png on the Screenshot line.
+          Do not commit, push or open a pull request: that is done for you after the checks pass again.
+          EOF
+          sed -i "s#REQUEST_FILE#$RUNNER_TEMP/request.md#" "$RUNNER_TEMP/instructions.md"
+          TOOLS='Read,Write,Edit,MultiEdit,Glob,Grep,TodoWrite,Bash(npm run lint),Bash(npm run lint:*),Bash(npm test),Bash(npm test:*),Bash(npm run build),Bash(npm run typecheck),Bash(npx tsc:*),Bash(npx eslint:*),Bash(git diff:*),Bash(git status),Bash(git log:*),Bash(ls:*)'
+          prompt="$(cat "$RUNNER_TEMP/instructions.md")"
+          ok=0
+          for attempt in 1 2 3; do
+            echo "::group::Claude, try $attempt"
+            claude -p "$prompt" --model claude-opus-5-5 --permission-mode acceptEdits --allowedTools "$TOOLS" \
+              --disallowedTools 'WebFetch,WebSearch' --max-turns 120 --output-format text | tail -40
+            echo "::endgroup::"
+            if [ -f .app-request/STOP.md ]; then echo "outcome=bigger" >> "$GITHUB_OUTPUT"; exit 0; fi
+            # Pictures: HTML mock-ups become PNGs (the "Team note picture" check needs a picture file).
+            for f in $(git ls-files --others --exclude-standard -- 'whats-new/*.html'); do
+              node "$RUNNER_TEMP/shot.js" "$f" "${f%.html}.png" && rm "$f"
+            done
+            # The repo's own checks, run again here, whatever Claude said.
+            : > "$RUNNER_TEMP/checks.log"
+            bad=$( { git diff --name-only "$BASE"; git ls-files --others --exclude-standard; } | grep -E '^(\.github/|vercel\.json$)|(^|/)\.env' || true)
+            if [ -n "$bad" ]; then echo "Changed files it must not touch: $bad" >> "$RUNNER_TEMP/checks.log";
+            elif (npm run lint && npm test && npm run build) >> "$RUNNER_TEMP/checks.log" 2>&1 && [ -s .app-request/PR.md ] && [ -s .app-request/CHANGED.txt ]; then ok=1; break; fi
+            [ -s .app-request/PR.md ] || echo ".app-request/PR.md is missing" >> "$RUNNER_TEMP/checks.log"
+            prompt="$(cat "$RUNNER_TEMP/instructions.md")
+
+          The checks failed after your last try. Fix this, then finish as before:
+          $(tail -c 6000 "$RUNNER_TEMP/checks.log")"
+          done
+          if [ "$ok" = 1 ]; then echo "outcome=built" >> "$GITHUB_OUTPUT"; else echo "outcome=failed" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Push the branch and open the pull request
+        id: pr
+        if: steps.build.outputs.outcome == 'built'
+        env:
+          GH_TOKEN: ${{ secrets.APP_REQUESTS_GH_TOKEN }}
+          CHANNEL: ${{ steps.req.outputs.channel }}
+        run: |
+          set -euo pipefail
+          title="$(head -n1 .app-request/PR.md)"
+          { tail -n +3 .app-request/PR.md; printf '\n\nCloses #%s. Asked for in Slack #app-requests; built by Claude, nothing merges until it is approved there.\n' "$ISSUE"; } > "$RUNNER_TEMP/body.md"
+          cp .app-request/CHANGED.txt "$RUNNER_TEMP/changed.txt"
+          rm -rf .app-request
+          git config user.name "FOMO app requests"
+          git config user.email "app-requests@fomorentals.co.uk"
+          git add -A
+          git commit -m "$title" -m "App request #$ISSUE (Slack #app-requests)" || echo "Nothing new to commit"
+          # Push with the App requests token, not the read-only checkout token.
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" "HEAD:refs/heads/$BRANCH"
+          url=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --state open --json url -q '.[0].url')
+          if [ -n "$url" ]; then gh pr edit "$url" --title "$title" --body-file "$RUNNER_TEMP/body.md"; else
+            url=$(gh pr create --repo "${{ github.repository }}" --head "$BRANCH" --base "${{ github.event.repository.default_branch }}" --title "$title" --body-file "$RUNNER_TEMP/body.md"); fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "number=${url##*/}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the preview (Vercel)
+        id: preview
+        if: steps.pr.outputs.sha != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = "${{ steps.pr.outputs.sha }}";
+            for (let i = 0; i < 32; i++) {
+              const { data: deps } = await github.rest.repos.listDeployments({ ...context.repo, sha, per_page: 10 });
+              for (const d of deps.filter((d) => /preview/i.test(d.environment))) {
+                const { data: st } = await github.rest.repos.listDeploymentStatuses({ ...context.repo, deployment_id: d.id, per_page: 1 });
+                if (st[0]?.state === "success") return core.setOutput("url", st[0].environment_url || st[0].target_url || "");
+                if (st[0]?.state === "failure" || st[0]?.state === "error") return core.notice("Preview deploy failed");
+              }
+              await new Promise((r) => setTimeout(r, 15000));
+            }
+            core.notice("No preview after 8 minutes");
+
+      - name: Tell the App requests app
+        if: always() && steps.req.outputs.thread != ''
+        env:
+          SECRET: ${{ secrets.APP_REQUESTS_CALLBACK_SECRET }}
+          OUTCOME: ${{ steps.build.outputs.outcome || 'failed' }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PREVIEW: ${{ steps.preview.outputs.url }}
+          CHANNEL: ${{ steps.req.outputs.channel }}
+          THREAD: ${{ steps.req.outputs.thread }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          outcome="$OUTCOME"; reason=""
+          if [ "$outcome" = built ] && [ -z "$PR_URL" ]; then outcome=failed; reason="The change was made but the pull request couldn't be opened."; fi
+          if [ "$outcome" = bigger ]; then reason="$(head -c 400 .app-request/STOP.md)"; fi
+          if [ "$outcome" = failed ] && [ -z "$reason" ]; then reason="The checks still failed after 3 tries: $(tail -c 300 "$RUNNER_TEMP/checks.log" 2>/dev/null | tr '\n' ' ')"; fi
+          changed="$(cat "$RUNNER_TEMP/changed.txt" 2>/dev/null || true)"
+          body=$(node -e 'const e=process.env;console.log(JSON.stringify({channel:e.CHANNEL,thread:e.THREAD,repo:e.REPO,issue:Number(e.ISSUE),outcome:process.argv[1],pr:Number(e.PR_NUMBER)||undefined,prUrl:e.PR_URL||undefined,changed:process.argv[2],checks:process.argv[1]==="built"?"passed":"failed",preview:e.PREVIEW||"",reason:process.argv[3],runUrl:e.RUN_URL}))' "$outcome" "$changed" "$reason")
+          sig="sha256=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')"
+          curl -sS --fail-with-body -X POST "$APP_URL/api/build/callback" -H "Content-Type: application/json" -H "x-signature: $sig" --data "$body"

@@ -1,0 +1,41 @@
+# Design notes: Jamie's decisions stay written down (Jamie, 17 Nov 2026).
+# Claude checks every #app-requests request against docs/DESIGN.md and CLAUDE.md, read fresh from GitHub,
+# so they must be current. This check fails a pull request that changes how the app behaves unless it
+# either updates the design notes or says, under "## Design notes", that no decision changed.
+# Copied into each app repo from FOMORentals/fomo-app-requests (templates/design-notes.yml).
+name: Design notes
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const files = await github.paginate(github.rest.pulls.listFiles, { ...context.repo, pull_number: context.payload.pull_request.number, per_page: 100 });
+            const names = files.map((f) => f.filename);
+            const NOTES = /^(docs\/DESIGN\.md|CLAUDE\.md)$/;
+            // Code that decides how the app behaves. Tests, docs, pictures and tooling don't count.
+            const BEHAVIOUR = /^(app|lib|components|worker|pages|src)\/.+\.(ts|tsx|js|jsx|mjs|cjs)$|^(proxy|middleware|auth|index)\.(ts|js)$|^vercel\.json$/;
+            const TEST = /\.(test|spec)\.(ts|tsx|js)$|(^|\/)__tests__\//;
+            const behaviour = names.filter((n) => BEHAVIOUR.test(n) && !TEST.test(n));
+            if (!behaviour.length) return core.notice("No change to how the app behaves: nothing to record.");
+            if (names.some((n) => NOTES.test(n))) return core.notice("Design notes updated in this pull request.");
+            const body = (context.payload.pull_request.body || "").replace(/<!--[\s\S]*?-->/g, "").replace(/\r/g, "");
+            const lines = body.split("\n");
+            const start = lines.findIndex((l) => /^#{1,6}\s*design notes\b/i.test(l.trim()));
+            const rest = start < 0 ? [] : lines.slice(start + 1);
+            const end = rest.findIndex((l) => /^#{1,6}\s/.test(l.trim()));
+            const section = (end < 0 ? rest : rest.slice(0, end)).join(" ").replace(/\*\*/g, "").trim();
+            if (/no decision changed\s*[:\-–]\s*\S/i.test(section)) return core.notice(`Design notes: ${section}`);
+            core.setFailed(
+              "This changes how the app behaves but doesn't say what it means for Jamie's decisions.\n" +
+              "Either update docs/DESIGN.md (or CLAUDE.md) with the decision, or add to the pull request description:\n" +
+              "## Design notes\nNo decision changed: <one line on why>\n" +
+              "Claude checks every #app-requests request against these notes, so they must stay current."
+            );
