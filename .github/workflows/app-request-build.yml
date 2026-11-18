@@ -94,6 +94,10 @@ jobs:
           REBUILD: ${{ steps.req.outputs.rebuild }}
         run: |
           set -uo pipefail
+          # A token copied from a terminal can carry the line break where it wrapped (18 Nov 2026).
+          CLAUDE_CODE_OAUTH_TOKEN="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN" | tr -d '[:space:]')"
+          export CLAUDE_CODE_OAUTH_TOKEN
+          : > "$RUNNER_TEMP/checks.log"
           mkdir -p .app-request
           cat > "$RUNNER_TEMP/instructions.md" <<'EOF'
           You are building a change that someone on the FOMO team asked for in Slack #app-requests.
@@ -134,8 +138,15 @@ jobs:
           for attempt in 1 2 3; do
             echo "::group::Claude, try $attempt"
             claude -p "$prompt" --model claude-opus-5-5 --permission-mode acceptEdits --allowedTools "$TOOLS" \
-              --disallowedTools 'WebFetch,WebSearch' --max-turns 120 --output-format text | tail -40
+              --disallowedTools 'WebFetch,WebSearch' --max-turns 120 --output-format text > "$RUNNER_TEMP/claude.out" 2>&1
+            code=$?
+            tail -40 "$RUNNER_TEMP/claude.out"
             echo "::endgroup::"
+            # Claude Code itself failed (login, limits): trying again won't help, so say why and stop.
+            if [ "$code" != 0 ]; then
+              echo "Claude Code stopped with an error: $(tail -c 400 "$RUNNER_TEMP/claude.out")" > "$RUNNER_TEMP/checks.log"
+              break
+            fi
             if [ -f .app-request/STOP.md ]; then echo "outcome=bigger" >> "$GITHUB_OUTPUT"; exit 0; fi
             # Pictures: HTML mock-ups become PNGs (the "Team note picture" check needs a picture file).
             for f in $(git ls-files --others --exclude-standard -- 'whats-new/*.html'); do
@@ -215,7 +226,7 @@ jobs:
           outcome="$OUTCOME"; reason=""
           if [ "$outcome" = built ] && [ -z "$PR_URL" ]; then outcome=failed; reason="The change was made but the pull request couldn't be opened."; fi
           if [ "$outcome" = bigger ]; then reason="$(head -c 400 .app-request/STOP.md)"; fi
-          if [ "$outcome" = failed ] && [ -z "$reason" ]; then reason="The checks still failed after 3 tries: $(tail -c 300 "$RUNNER_TEMP/checks.log" 2>/dev/null | tr '\n' ' ')"; fi
+          if [ "$outcome" = failed ] && [ -z "$reason" ]; then reason="It didn't work: $( { tail -c 300 "$RUNNER_TEMP/checks.log" 2>/dev/null || true; } | tr '\n' ' ')"; fi
           changed="$(cat "$RUNNER_TEMP/changed.txt" 2>/dev/null || true)"
           body=$(node -e 'const e=process.env;console.log(JSON.stringify({channel:e.CHANNEL,thread:e.THREAD,repo:e.REPO,issue:Number(e.ISSUE),outcome:process.argv[1],pr:Number(e.PR_NUMBER)||undefined,prUrl:e.PR_URL||undefined,changed:process.argv[2],checks:process.argv[1]==="built"?"passed":"failed",preview:e.PREVIEW||"",reason:process.argv[3],runUrl:e.RUN_URL}))' "$outcome" "$changed" "$reason")
           sig="sha256=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')"
