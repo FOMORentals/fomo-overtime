@@ -22,6 +22,9 @@ export interface Actor {
 export const SYSTEM: Actor = { userId: "system", email: "", name: "Overtime bot", admin: true };
 
 export class UserError extends Error {}
+/** Taking this would overlap overtime the person already has; they can confirm and take it anyway (Jamie, 18 Nov 2026). */
+export class ClashError extends UserError {}
+export const CLASH_WARNING = "You already have overtime booked at that time. Are you sure you want this one too? You'll be on both, and both are paid as posted.";
 
 
 function audit(tx: Transaction | null, actor: Actor, action: string, data: Record<string, unknown>) {
@@ -226,7 +229,7 @@ export type ClaimResult =
   | { ok: true; slot: Slot; claim: Claim }
   | { ok: false; reason: ClaimRefusal | "missing"; slot: Slot | null; clashWith?: string };
 
-export async function claimSlot(slotId: string, actor: Actor, route: Route, now = Date.now()): Promise<ClaimResult> {
+export async function claimSlot(slotId: string, actor: Actor, route: Route, now = Date.now(), clashConfirmed = false): Promise<ClaimResult> {
   return db().runTransaction(async (tx) => {
     const ref = db().collection(COL.slots).doc(slotId);
     const snap = await tx.get(ref);
@@ -235,7 +238,7 @@ export async function claimSlot(slotId: string, actor: Actor, route: Route, now 
     const mineSnap = await tx.get(db().collection(COL.claims).where("userId", "==", actor.userId).where("status", "==", "confirmed"));
     const mine = mineSnap.docs.map((d) => d.data() as Claim);
     const effectiveRoute: Route = route === "early_finish" && offersEarlyFinish(slot) ? "early_finish" : "paid";
-    const check = canClaim(slot, actor.userId, mine, now, effectiveRoute);
+    const check = canClaim(slot, actor.userId, mine, now, effectiveRoute, clashConfirmed);
     if (!check.ok) return { ok: false, reason: check.reason, slot, clashWith: check.clashWith };
 
     const claim = newClaim(slot, actor, effectiveRoute, now);
@@ -246,7 +249,7 @@ export async function claimSlot(slotId: string, actor: Actor, route: Route, now 
     void _id;
     tx.set(db().collection(COL.claims).doc(claimId), data); // a re-claim after withdrawing replaces the old row; the audit log keeps history
     tx.update(ref, { claimedCount: FieldValue.increment(1), status, updatedAt: now });
-    audit(tx, actor, "claim.create", { slotId, claimId, route: effectiveRoute, amountPence: claim.amountPence });
+    audit(tx, actor, "claim.create", { slotId, claimId, route: effectiveRoute, amountPence: claim.amountPence, ...(clashConfirmed ? { clashConfirmed: true } : {}) });
     return { ok: true, slot: { ...slot, claimedCount: count, status }, claim };
   });
 }
@@ -313,6 +316,7 @@ export async function acceptOffer(
   fromUserId: string,
   to: Actor,
   now = Date.now(),
+  clashConfirmed = false,
 ): Promise<{ slot: Slot; oldClaim: Claim; claim: Claim }> {
   return db().runTransaction(async (tx) => {
     const slotRef = db().collection(COL.slots).doc(slotId);
@@ -328,14 +332,15 @@ export async function acceptOffer(
     if (!old || old.status !== "confirmed" || old.offerTo !== to.userId) throw new UserError("This offer is no longer open.");
     const route: Route = old.route === "early_finish" && offersEarlyFinish(slot) ? "early_finish" : "paid";
     // Check as if the giver's space were free, so "full" doesn't block the hand-over.
-    const check = canClaim({ ...slot, claimedCount: slot.claimedCount - 1 }, to.userId, mineSnap.docs.map((d) => d.data() as Claim), now, route);
+    const check = canClaim({ ...slot, claimedCount: slot.claimedCount - 1 }, to.userId, mineSnap.docs.map((d) => d.data() as Claim), now, route, clashConfirmed);
     if (!check.ok) {
+      if (check.reason === "clash") throw new ClashError(CLASH_WARNING);
       const why: Record<ClaimRefusal, string> = {
         not_open: "That slot has been cancelled or has already happened.",
         started: "That slot has already started.",
         full: "That slot is full.",
         already_claimed: "You're already on this slot.",
-        clash: "You already have overtime booked at that time, so you can't take this one.",
+        clash: CLASH_WARNING,
       };
       throw new UserError(why[check.reason]);
     }
@@ -346,7 +351,7 @@ export async function acceptOffer(
     tx.update(oldRef, oldFields);
     tx.set(db().collection(COL.claims).doc(claim.id), data);
     tx.update(slotRef, { updatedAt: now });
-    audit(tx, to, "claim.swap", { slotId, fromClaimId: old.id, toClaimId: claim.id, route, amountPence: claim.amountPence });
+    audit(tx, to, "claim.swap", { slotId, fromClaimId: old.id, toClaimId: claim.id, route, amountPence: claim.amountPence, ...(clashConfirmed ? { clashConfirmed: true } : {}) });
     return { slot: { ...slot, updatedAt: now }, oldClaim: { ...old, ...oldFields }, claim };
   });
 }
