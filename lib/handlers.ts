@@ -10,10 +10,10 @@ import { actorFor, dm, dmEmail, slack } from "./slack";
 import { APPROVER_EMAIL, PAYROLL_SENDER_EMAIL } from "./staff";
 import {
   acceptOffer, approvePayRun, assignFreelancer, cancelSlot, claimSlot, claimsForSlot, removeFreelancer, claimsByIds, claimsForUser, createSlot, declineOffer, editSlot, getClaim, getSlot,
-  markPayRunSent, offerClaim, UserError, withdrawClaim, type Actor,
+  CLASH_WARNING, ClashError, markPayRunSent, offerClaim, UserError, withdrawClaim, type Actor,
 } from "./store";
 import { londonParts, monthLabel, prettyDate } from "./time";
-import type { Route, SlotInput } from "./types";
+import type { Route, Slot, SlotInput } from "./types";
 import { assignModal, giveModal, offerMessage, unassignModal, payRunBlocks, readSlotForm, routeModal, slotLine, slotModal } from "./views";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -27,38 +27,80 @@ export const REFUSAL_TEXT: Record<ClaimRefusal | "missing", string> = {
   full: "Too late, someone else just claimed the last space.",
   started: "That slot has already started.",
   already_claimed: "You've already claimed this one.",
-  clash: "You already have overtime booked at that time, so you can't claim this one too.",
+  clash: CLASH_WARNING,
 };
 
-/** Private reply to whoever pressed the button. */
-async function tell(p: Payload, text: string) {
+/** Private reply to whoever pressed the button. `replace` overwrites the private message the button was on. */
+async function tell(p: Payload, text: string, blocks?: unknown[], replace = false) {
   if (p.response_url) {
     const res = await fetch(p.response_url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ response_type: "ephemeral", replace_original: false, text }),
+      body: JSON.stringify({ response_type: "ephemeral", replace_original: replace, text, ...(blocks ? { blocks } : {}) }),
     });
     if (!res.ok) throw new Error(`response_url ${res.status}`);
     return;
   }
-  await dm(p.user.id, text);
+  await dm(p.user.id, text, blocks);
+}
+
+function noticeModal(title: string, text: string) {
+  return { type: "modal", title: { type: "plain_text", text: title }, close: { type: "plain_text", text: "Close" }, blocks: [{ type: "section", text: { type: "plain_text", text } }] };
+}
+
+/** Shown in place of the Paid / work-the-time form when the slot overlaps overtime they already have. */
+export function clashConfirmModal(slot: Slot, route: Route, other: Slot | null) {
+  return {
+    type: "modal",
+    callback_id: "clash_confirm",
+    private_metadata: `${slot.id}|${route}`,
+    title: { type: "plain_text", text: "Already booked" },
+    submit: { type: "plain_text", text: "Yes, claim both" },
+    close: { type: "plain_text", text: "No, leave it" },
+    blocks: [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: `:warning: ${CLASH_WARNING}${other ? `\nAlready booked: *${slotLine(other)}*` : ""}\nThis one: *${slotLine(slot)}*` },
+      },
+    ],
+  };
+}
+
+/** Overlap warning (Jamie, 18 Nov 2026): the person can confirm and take both slots. */
+export function clashWarningBlocks(text: string, confirm: { actionId: string; value: string; label: string }, cancel: { actionId: string; value: string; label: string }) {
+  return [
+    { type: "section", text: { type: "mrkdwn", text: `:warning: ${text}` } },
+    {
+      type: "actions",
+      elements: [
+        { type: "button", style: "primary", text: { type: "plain_text", text: confirm.label }, action_id: confirm.actionId, value: confirm.value },
+        { type: "button", text: { type: "plain_text", text: cancel.label }, action_id: cancel.actionId, value: cancel.value },
+      ],
+    },
+  ];
 }
 
 function todayLondon() {
   return londonParts(Date.now()).date;
 }
 
-async function doClaim(p: Payload, actor: Actor, slotId: string, route: Route) {
-  const r = await claimSlot(slotId, actor, route);
+async function doClaim(p: Payload, actor: Actor, slotId: string, route: Route, clashConfirmed = false) {
+  const r = await claimSlot(slotId, actor, route, Date.now(), clashConfirmed);
   if (!r.ok) {
-    let text = REFUSAL_TEXT[r.reason];
-    if (r.reason === "clash" && r.clashWith) {
-      const other = await getSlot(r.clashWith);
-      if (other) text += ` (${slotLine(other)})`;
+    if (r.reason === "clash") {
+      const other = r.clashWith ? await getSlot(r.clashWith) : null;
+      const text = `${CLASH_WARNING}${other ? `\nAlready booked: *${slotLine(other)}*` : ""}${r.slot ? `\nThis one: *${slotLine(r.slot)}*` : ""}`;
+      await tell(
+        p,
+        text.replace(/\*/g, ""),
+        clashWarningBlocks(text, { actionId: "claim_anyway", value: `${slotId}|${route}`, label: "Yes, claim both" }, { actionId: "claim_anyway_no", value: slotId, label: "No, leave it" }),
+      );
+      return;
     }
-    await tell(p, text);
+    await tell(p, REFUSAL_TEXT[r.reason], undefined, clashConfirmed);
     return;
   }
+  if (clashConfirmed) await tell(p, `:white_check_mark: You're on both. *${slotLine(r.slot)}* is yours too.`, undefined, true);
   await afterClaim(r.slot, r.claim);
 }
 
@@ -86,6 +128,19 @@ async function handleBlockAction(p: Payload) {
         after(() => doClaim(p, actor, slot.id, "paid").catch((e) => report(e, "claim", { slotId: slot.id })));
         return;
       }
+      case "claim_anyway": {
+        const [slotId, route] = String(action.value).split("|");
+        after(() =>
+          doClaim(p, actor, slotId, route === "early_finish" ? "early_finish" : "paid", true).catch(async (e) => {
+            report(e, "claim_anyway", { slotId });
+            await tell(p, "Something went wrong claiming. Please try again, or message Sam.").catch((e2) => report(e2, "claim_anyway.tell"));
+          }),
+        );
+        return;
+      }
+      case "claim_anyway_no":
+        await tell(p, "OK, you haven't claimed it.", undefined, true);
+        return;
       case "withdraw": {
         const slotId = action.value;
         after(async () => {
@@ -112,15 +167,17 @@ async function handleBlockAction(p: Payload) {
         return;
       }
       case "swap_accept":
+      case "swap_accept_anyway":
       case "swap_decline": {
         const [slotId, fromUserId] = String(action.value).split("|");
-        const accept = action.action_id === "swap_accept";
+        const accept = action.action_id !== "swap_decline";
+        const clashConfirmed = action.action_id === "swap_accept_anyway";
         after(async () => {
-          const done = (text: string) =>
-            slack("chat.update", { channel: p.channel.id, ts: p.message.ts, text, blocks: [{ type: "section", text: { type: "mrkdwn", text } }] });
+          const done = (text: string, blocks?: unknown[]) =>
+            slack("chat.update", { channel: p.channel.id, ts: p.message.ts, text: text.replace(/\*/g, ""), blocks: blocks ?? [{ type: "section", text: { type: "mrkdwn", text } }] });
           try {
             if (accept) {
-              const { slot, oldClaim, claim } = await acceptOffer(slotId, fromUserId, actor);
+              const { slot, oldClaim, claim } = await acceptOffer(slotId, fromUserId, actor, Date.now(), clashConfirmed);
               await done(`:white_check_mark: You've taken *${slotLine(slot)}* from ${oldClaim.name}.`);
               await afterSwap(slot, oldClaim, claim);
             } else {
@@ -130,7 +187,14 @@ async function handleBlockAction(p: Payload) {
               await dm(fromUserId, `${actor.name} can't take *${slot ? slotLine(slot) : c.slotLabel}*, so you're still on it. You can offer it to someone else, or Withdraw.`);
             }
           } catch (e) {
-            if (e instanceof UserError) await done(e.message);
+            if (e instanceof ClashError) {
+              const slot = await getSlot(slotId);
+              const text = `${e.message}${slot ? `\nThis one: *${slotLine(slot)}*` : ""}`;
+              await done(
+                text,
+                clashWarningBlocks(text, { actionId: "swap_accept_anyway", value: action.value, label: "Yes, take it" }, { actionId: "swap_decline", value: action.value, label: "No thanks" }),
+              );
+            } else if (e instanceof UserError) await done(e.message);
             else {
               report(e, accept ? "swap.accept" : "swap.decline", { slotId, fromUserId });
               await tell(p, "Something went wrong. Please try again, or message Sam.");
@@ -269,9 +333,16 @@ async function handleViewSubmission(p: Payload): Promise<Record<string, unknown>
     }
   }
 
-  if (view.callback_id === "route_form") {
-    const route = (view.state.values.route?.v?.selected_option?.value ?? "paid") as Route;
-    const r = await claimSlot(view.private_metadata, actor, route);
+  if (view.callback_id === "route_form" || view.callback_id === "clash_confirm") {
+    const confirming = view.callback_id === "clash_confirm";
+    const [slotId, savedRoute] = String(view.private_metadata).split("|");
+    const route = (confirming ? savedRoute : view.state.values.route?.v?.selected_option?.value ?? "paid") as Route;
+    const r = await claimSlot(slotId, actor, route, Date.now(), confirming);
+    if (!r.ok && r.reason === "clash" && r.slot) {
+      const other = r.clashWith ? await getSlot(r.clashWith) : null;
+      return { response_action: "update", view: clashConfirmModal(r.slot, route, other) };
+    }
+    if (!r.ok && confirming) return { response_action: "update", view: noticeModal("Can't claim", REFUSAL_TEXT[r.reason]) };
     if (!r.ok) return { response_action: "errors", errors: { route: REFUSAL_TEXT[r.reason] } };
     after(() => afterClaim(r.slot, r.claim).catch((e) => report(e, "afterClaim", { claimId: r.claim.id })));
     return null;

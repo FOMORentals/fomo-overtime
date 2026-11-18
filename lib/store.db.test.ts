@@ -121,8 +121,23 @@ test("database rules", { skip: !enabled && "set FIRESTORE_EMULATOR_HOST to run" 
     await store.claimSlot(a.id, people[2], "paid", now);
     await store.claimSlot(b.id, people[3], "paid", now);
     await store.offerClaim(a.id, people[2], people[3], now);
-    await assert.rejects(store.acceptOffer(a.id, people[2].userId, people[3], now), /already have overtime/);
+    await assert.rejects(store.acceptOffer(a.id, people[2].userId, people[3], now), store.ClashError);
     assert.equal((await store.getClaim(`${a.id}_${people[2].userId}`))?.status, "confirmed");
+    // After confirming the warning they take it and are on both.
+    const r = await store.acceptOffer(a.id, people[2].userId, people[3], now, true);
+    assert.equal(r.claim.userId, people[3].userId);
+    assert.equal((await store.getClaim(`${b.id}_${people[3].userId}`))?.status, "confirmed");
+  });
+
+  await t.test("overlapping overtime: claimed after confirming, both paid as posted", async () => {
+    const a = await store.createSlot({ ...base, date: "2026-11-19", startTime: "18:40", endTime: "19:10" }, louis, now);
+    const b = await store.createSlot({ ...base, date: "2026-11-19", startTime: "18:55", endTime: "19:25" }, louis, now);
+    assert.equal((await store.claimSlot(a.id, people[0], "paid", now)).ok, true);
+    const warned = await store.claimSlot(b.id, people[0], "paid", now);
+    assert.equal(!warned.ok && warned.reason, "clash");
+    const r = await store.claimSlot(b.id, people[0], "paid", now, true);
+    assert.ok(r.ok && r.claim.amountPence === base.feePence);
+    assert.equal((await store.getClaim(`${a.id}_${people[0].userId}`))?.amountPence, base.feePence);
   });
 
   await t.test("freelancer: poster assigns, it takes a space at £0, edits keep it £0, remove frees it", async () => {

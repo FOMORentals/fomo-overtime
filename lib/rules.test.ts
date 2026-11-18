@@ -76,10 +76,12 @@ test("claim: first come first served", () => {
   );
 });
 
-test("claim: overlapping overtime is blocked, back-to-back is fine", () => {
+test("claim: overlapping overtime warns until confirmed, back-to-back is fine", () => {
   const s = slot();
   const clash = { slotId: "other", startAt: s.startAt + 10 * 60000, endAt: s.endAt + HOUR, route: "paid" as const };
   assert.equal((canClaim(s, "U1", [clash], NOW, "paid") as { reason: string }).reason, "clash");
+  assert.deepEqual(canClaim(s, "U1", [clash], NOW, "paid", true), { ok: true });
+  assert.equal((canClaim(slot({ claimedCount: 1 }), "U1", [clash], NOW, "paid", true) as { reason: string }).reason, "full", "confirming doesn't skip the other checks");
   const after = { slotId: "other", startAt: s.endAt, endAt: s.endAt + HOUR, route: "paid" as const };
   assert.deepEqual(canClaim(s, "U1", [after], NOW, "paid"), { ok: true });
 });
@@ -152,6 +154,15 @@ test("paired paid slots within an hour are flagged", () => {
   const w = pairedSlotWarnings([a, b, c, free]);
   assert.equal(w.length, 1);
   assert.deepEqual([w[0].a.id, w[0].b.id], ["a", "b"]);
+});
+
+test("overlapping paid slots someone confirmed are not flagged at month end", () => {
+  const at = (t: string, mins = 30) => ({ startAt: londonToUtc("2026-11-19", t), endAt: londonToUtc("2026-11-19", t) + mins * 60000 });
+  const first = claim({ id: "a", ...at("18:40") });
+  const overlapping = claim({ id: "b", ...at("19:00") });
+  assert.equal(pairedSlotWarnings([first, overlapping]).length, 0);
+  const near = claim({ id: "c", ...at("19:30") });
+  assert.equal(pairedSlotWarnings([first, near]).length, 1, "back-to-back within an hour is still flagged");
 });
 
 test("totals and CSV", () => {

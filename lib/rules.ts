@@ -73,13 +73,17 @@ export function spacesLeft(slot: Pick<Slot, "spaces" | "claimedCount">): number 
 
 export type ClaimRefusal = "not_open" | "full" | "started" | "already_claimed" | "clash";
 
-/** First-come-first-served check, run inside the database transaction. */
+/**
+ * First-come-first-served check, run inside the database transaction.
+ * Overlapping overtime is a warning (Jamie, 18 Nov 2026): "clash" comes back until the person confirms (`clashConfirmed`).
+ */
 export function canClaim(
   slot: Slot,
   userId: string,
   usersActiveClaims: Pick<Claim, "slotId" | "startAt" | "endAt" | "route">[],
   now: number,
   route: Route,
+  clashConfirmed = false,
 ): { ok: true } | { ok: false; reason: ClaimRefusal; clashWith?: string } {
   if (slot.status !== "open" && slot.status !== "full") return { ok: false, reason: "not_open" };
   if (slot.startAt <= now) return { ok: false, reason: "started" };
@@ -87,7 +91,7 @@ export function canClaim(
   if (spacesLeft(slot) <= 0) return { ok: false, reason: "full" };
   const mine = calendarWindow(slot, route);
   const clash = usersActiveClaims.find((c) => overlaps(mine, c));
-  if (clash) return { ok: false, reason: "clash", clashWith: clash.slotId };
+  if (clash && !clashConfirmed) return { ok: false, reason: "clash", clashWith: clash.slotId };
   void userId;
   return { ok: true };
 }
@@ -164,7 +168,10 @@ export function payableClaims(claims: Claim[]): Claim[] {
   return claims.filter((c) => c.status === "completed" && !c.flagged && !c.paidRunId && c.amountPence > 0 && !c.freelancer);
 }
 
-/** Pairs of paid slots one person did within an hour of each other ("not compounded"). */
+/**
+ * Pairs of paid slots one person did within an hour of each other ("not compounded").
+ * Overlapping slots are left out: the person confirmed they're doing both, and both are paid (Jamie, 18 Nov 2026).
+ */
 export function pairedSlotWarnings(claims: Claim[]): { userId: string; a: Claim; b: Claim }[] {
   const out: { userId: string; a: Claim; b: Claim }[] = [];
   const byUser = new Map<string, Claim[]>();
@@ -175,6 +182,7 @@ export function pairedSlotWarnings(claims: Claim[]): { userId: string; a: Claim;
   for (const [userId, list] of byUser) {
     list.sort((x, y) => x.startAt - y.startAt);
     for (let i = 1; i < list.length; i++) {
+      if (overlaps(list[i - 1], list[i])) continue;
       if (list[i].startAt - list[i - 1].startAt <= PAIRED_SLOT_MINUTES * 60_000) out.push({ userId, a: list[i - 1], b: list[i] });
     }
   }
