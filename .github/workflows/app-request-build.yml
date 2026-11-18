@@ -177,8 +177,8 @@ jobs:
           { tail -n +3 .app-request/PR.md; printf '\n\nCloses #%s. Asked for in Slack #app-requests; built by Claude, nothing merges until it is approved there.\n' "$ISSUE"; } > "$RUNNER_TEMP/body.md"
           cp .app-request/CHANGED.txt "$RUNNER_TEMP/changed.txt"
           rm -rf .app-request
-          git config user.name "FOMO app requests"
-          git config user.email "app-requests@fomorentals.co.uk"
+          git config user.name "Claude"
+          git config user.email "noreply@anthropic.com"  # Vercel blocks previews from an address it cannot match to a GitHub account (18 Nov 2026)
           git add -A
           git commit -m "$title" -m "App request #$ISSUE (Slack #app-requests)" || echo "Nothing new to commit"
           # Push with the App requests token, not the read-only checkout token.
