@@ -109,8 +109,9 @@ jobs:
 
           STOP INSTEAD OF BUILDING if the change would touch any of: deal money, stage or close date; payments or invoices;
           customer emails; Rentman writes or more Rentman calls; HubSpot or Xero writes; logins or who can see what;
-          a new scheduled job; deleting data; or it goes against a decision in docs/DESIGN.md or CLAUDE.md that the request
-          doesn't say Jamie has approved. Then write one plain-English sentence saying why to .app-request/STOP.md and finish.
+          a new scheduled job; deleting data; or it goes against a decision in docs/DESIGN.md or CLAUDE.md. The exception is
+          anything the request's "Jamie's go-ahead" section or its contradiction section says Jamie has approved: build that.
+          When you stop, write one plain-English sentence saying why to .app-request/STOP.md and finish.
 
           Never edit anything under .github/, any .env file, or vercel.json. Don't add dependencies unless the request needs one.
 
