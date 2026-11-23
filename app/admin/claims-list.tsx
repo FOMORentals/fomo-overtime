@@ -4,8 +4,8 @@ import { londonParts } from "@/lib/time";
 import type { Claim } from "@/lib/types";
 
 type FormAction = ((form: FormData) => Promise<void>) | string;
-/** Freelancer claim id → the slot fee they invoice FOMO for (kept out of payroll). */
-export type FreelancerFees = Record<string, number>;
+/** Claim id → its slot's posted fee (a freelancer's invoice amount; what a team member gets if switched to Paid). */
+export type SlotFees = Record<string, number>;
 
 const DAY = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: "Europe/London" });
 const DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "Europe/London" });
@@ -30,11 +30,16 @@ export function groupOf(c: Claim, now: number): ClaimGroup {
   return "upcoming";
 }
 
-function Row({ c, now, flagAction, unflagAction, fees }: { c: Claim; now: number; flagAction: FormAction; unflagAction: FormAction; fees: FreelancerFees }) {
+function Row({ c, now, flagAction, unflagAction, switchAction, fees }: {
+  c: Claim; now: number; flagAction: FormAction; unflagAction: FormAction; switchAction?: FormAction; fees: SlotFees;
+}) {
   const { kind, client } = splitLabel(c.slotLabel);
   const g = groupOf(c, now);
   const timeInstead = c.route === "early_finish";
   // Only claims that cost money can be left out of pay (time-instead and free ones have nothing to leave out).
+  // Paid ↔ Time instead (23 Nov): team members' shifts on paid slots, until sent to payroll.
+  const slotFee = fees[c.id] ?? 0;
+  const canSwitch = !!switchAction && !c.freelancer && !c.paidRunId && slotFee > 0 && (c.status === "completed" || c.status === "confirmed");
   const canChange = !c.paidRunId && (c.status === "completed" || c.status === "confirmed") && (c.amountPence > 0 || c.flagged);
   return (
     <li className={`claim ${g}`}>
@@ -62,6 +67,15 @@ function Row({ c, now, flagAction, unflagAction, fees }: { c: Claim; now: number
         {g === "flagged" && <div className="flag-reason">Left out of pay: {c.flagReason}</div>}
         {g === "paid" && <span className="tag good">Paid · {c.paidRunId}</span>}
         {g === "dropped" && <span className="tag">{c.status === "withdrawn" ? "Withdrawn" : "Cancelled"}</span>}
+        {canSwitch && (
+          <form action={switchAction} className="switcher">
+            <input type="hidden" name="claimId" value={c.id} />
+            <input type="hidden" name="to" value={timeInstead ? "paid" : "early_finish"} />
+            <button title={`${c.name} gets a Slack message and their calendar is updated`}>
+              {timeInstead ? `Switch to Paid (${money(slotFee)})` : "Switch to Time instead"}
+            </button>
+          </form>
+        )}
         {canChange && c.flagged && (
           <form action={unflagAction}>
             <input type="hidden" name="claimId" value={c.id} />
@@ -84,7 +98,7 @@ function Row({ c, now, flagAction, unflagAction, fees }: { c: Claim; now: number
 }
 
 function Group({ title, note, claims, ...rest }: {
-  title: string; note?: string; claims: Claim[]; now: number; flagAction: FormAction; unflagAction: FormAction; fees: FreelancerFees;
+  title: string; note?: string; claims: Claim[]; now: number; flagAction: FormAction; unflagAction: FormAction; switchAction?: FormAction; fees: SlotFees;
 }) {
   if (!claims.length) return null;
   return (
@@ -95,14 +109,14 @@ function Group({ title, note, claims, ...rest }: {
   );
 }
 
-export function ClaimsList({ claims, now, flagAction, unflagAction, fees = {} }: {
-  claims: Claim[]; now: number; flagAction: FormAction; unflagAction: FormAction; fees?: FreelancerFees;
+export function ClaimsList({ claims, now, flagAction, unflagAction, switchAction, fees = {} }: {
+  claims: Claim[]; now: number; flagAction: FormAction; unflagAction: FormAction; switchAction?: FormAction; fees?: SlotFees;
 }) {
   const by = (g: ClaimGroup) => claims.filter((c) => groupOf(c, now) === g).sort((a, b) => a.startAt - b.startAt);
   const due = by("due");
   const dueTotal = due.filter((c) => c.amountPence > 0).reduce((t, c) => t + c.amountPence, 0);
   const dropped = by("dropped");
-  const props = { now, flagAction, unflagAction, fees };
+  const props = { now, flagAction, unflagAction, switchAction, fees };
   if (!claims.length) return <p className="muted">No claims this month.</p>;
   return (
     <div>

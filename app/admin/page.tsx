@@ -3,9 +3,10 @@ import { adminEmail } from "@/lib/admin-session";
 import { COL, db } from "@/lib/firestore";
 import { money, pairedSlotWarnings, totalsByPerson } from "@/lib/rules";
 import { staffByEmail } from "@/lib/staff";
-import { claimsInMonth, getPayRun, getSlot, liveSlots, setClaimFlag, type Actor } from "@/lib/store";
+import { afterRouteSwitch } from "@/lib/actions";
+import { claimsInMonth, getPayRun, getSlot, liveSlots, setClaimFlag, switchClaimRoute, type Actor } from "@/lib/store";
 import { finalFriday, londonParts, monthLabel, prettyDate } from "@/lib/time";
-import { ClaimsList, type FreelancerFees } from "./claims-list";
+import { ClaimsList, type SlotFees } from "./claims-list";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,15 @@ async function unflagAction(form: FormData) {
   "use server";
   const actor = await adminActor();
   await setClaimFlag(String(form.get("claimId")), false, null, actor);
+  revalidatePath("/admin");
+}
+
+async function switchRouteAction(form: FormData) {
+  "use server";
+  const actor = await adminActor();
+  const to = form.get("to") === "paid" ? "paid" : "early_finish";
+  const { slot, claim } = await switchClaimRoute(String(form.get("claimId")), to, actor);
+  await afterRouteSwitch(slot, claim, actor);
   revalidatePath("/admin");
 }
 
@@ -63,10 +73,13 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
     getPayRun(month),
     db().collection(COL.meta).doc("tick").get(),
   ]);
-  // Freelancers are £0 on payroll (they invoice FOMO), but Sam wants to see what they're owed (11 Nov).
-  const flClaims = all.filter((c) => c.freelancer && (c.status === "confirmed" || c.status === "completed"));
-  const flSlots = await Promise.all(flClaims.map((c) => getSlot(c.slotId)));
-  const fees: FreelancerFees = Object.fromEntries(flClaims.map((c, i) => [c.id, flSlots[i]?.feePence ?? 0]));
+  // Each active claim's slot fee: freelancers are £0 on payroll (they invoice FOMO), but Sam wants to see what
+  // they're owed (11 Nov); team members' shifts on paid slots can be switched between Paid and Time instead (23 Nov).
+  const active = all.filter((c) => c.status === "confirmed" || c.status === "completed");
+  const slotIds = [...new Set(active.map((c) => c.slotId))];
+  const slotFee = new Map((await Promise.all(slotIds.map((id) => getSlot(id)))).map((s, i) => [slotIds[i], s?.feePence ?? 0]));
+  const fees: SlotFees = Object.fromEntries(active.map((c) => [c.id, slotFee.get(c.slotId) ?? 0]));
+  const flClaims = active.filter((c) => c.freelancer);
   const flTotals = new Map<string, number>();
   for (const c of flClaims) flTotals.set(c.name, (flTotals.get(c.name) ?? 0) + (fees[c.id] ?? 0));
   const counted = all.filter((c) => c.status === "completed" || (c.status === "confirmed" && c.endAt <= now));
@@ -137,7 +150,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
       )}
 
       <h2>Claims this month</h2>
-      <ClaimsList claims={all} now={now} flagAction={flagAction} unflagAction={unflagAction} fees={fees} />
+      <ClaimsList claims={all} now={now} flagAction={flagAction} unflagAction={unflagAction} switchAction={switchRouteAction} fees={fees} />
 
       <h2>Upcoming slots</h2>
       <div className="scroll">
@@ -155,7 +168,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
           </tbody>
         </table>
       </div>
-      <p className="muted">Signed in as {email}. &quot;Leave out of pay&quot; can be undone until the pay run; every change is logged.</p>
+      <p className="muted">Signed in as {email}. &quot;Leave out of pay&quot; and the Paid / Time instead switch can be changed until Jamie presses &quot;Sent to payroll&quot;; every change is logged.</p>
     </main>
   );
 }

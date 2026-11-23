@@ -164,6 +164,15 @@ export function routeModal(s: Slot): Block {
   };
 }
 
+/** DM when an admin switches someone's shift between Paid and Time instead. */
+export function routeSwitchMessage(s: Slot, c: Claim, by: string): string {
+  const now =
+    c.route === "early_finish"
+      ? `It's now *time instead* (no extra pay)${s.leaveEarlyAt ? `, so you *leave at ${s.leaveEarlyAt}*` : ""}.`
+      : `It's now *paid*: ${money(c.amountPence)} goes in your overtime for ${monthLabel(s.date.slice(0, 7))}.`;
+  return `:arrows_counterclockwise: ${esc(by)} changed your overtime on *${slotLine(s)}*. ${now} Your calendar has been updated.`;
+}
+
 export function claimConfirmation(s: Slot, c: Claim, calendarBusy: boolean): string {
   const parts = [`You're down for *${slotLine(s)}*.`];
   if (c.route === "early_finish") parts.push(s.leaveEarlyAt ? `You chose to work the time and *leave at ${s.leaveEarlyAt}* (no extra pay).` : "You chose to work the time instead of being paid (no extra pay).");

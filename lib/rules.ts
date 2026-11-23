@@ -55,6 +55,25 @@ export function amountFor(slot: Pick<Slot, "feePence">, route: Route): number {
   return route === "early_finish" ? 0 : slot.feePence;
 }
 
+export type SwitchRefusal = "freelancer" | "free" | "not_active" | "paid_out" | "same";
+
+/**
+ * Admin switch between Paid and Time instead (Jamie, 23 Nov 2026, via #app-requests).
+ * Only on a team member's confirmed or finished shift on a paid slot, and only until it has gone to payroll.
+ */
+export function canSwitchRoute(
+  claim: Pick<Claim, "status" | "freelancer" | "paidRunId" | "route">,
+  slot: Pick<Slot, "feePence">,
+  to: Route,
+): SwitchRefusal | null {
+  if (claim.freelancer) return "freelancer";
+  if (!offersEarlyFinish(slot)) return "free";
+  if (claim.status !== "confirmed" && claim.status !== "completed") return "not_active";
+  if (claim.paidRunId) return "paid_out";
+  if (claim.route === to) return "same";
+  return null;
+}
+
 /** What goes in the calendar: early finish runs from arrival to the agreed leave time. */
 export function calendarWindow(slot: Pick<Slot, "date" | "startAt" | "endAt" | "leaveEarlyAt">, route: Route) {
   if (route === "early_finish" && slot.leaveEarlyAt) {

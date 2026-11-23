@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   amountFor, calendarWindow, canClaim, claimsToComplete, dueNudges, isLateWithdrawal, money, pairedSlotWarnings,
-  parseFee, payRunCsv, payRunDue, payableClaims, statusAfterCount, roundupDue, slotsInWeek, canOffer, offersEarlyFinish, totalsByPerson, validateSlotInput, HOUR,
+  canSwitchRoute, parseFee, payRunCsv, payRunDue, payableClaims, statusAfterCount, roundupDue, slotsInWeek, canOffer, offersEarlyFinish, totalsByPerson, validateSlotInput, HOUR,
 } from "./rules";
 import { londonToUtc, slotInstants, summaryDay } from "./time";
 import type { Claim, Slot, SlotInput } from "./types";
@@ -232,4 +232,17 @@ test("freelancer claims get no reminders and never reach payroll", () => {
   const fl = claim({ id: "s1_fl_eden", userId: "freelancer:s1_fl_eden", name: "Eden", freelancer: true, claimedAt: NOW - 5 * 86_400_000 });
   assert.deepEqual(dueNudges([s], [fl], s.startAt - 30 * 60_000).filter((n) => "claimId" in n), []);
   assert.deepEqual(payableClaims([{ ...fl, status: "completed", amountPence: 5000 }]), []);
+});
+
+test("admin switch between Paid and Time instead: team shifts on paid slots, until sent to payroll", () => {
+  const c = claim({ route: "early_finish", amountPence: 0 });
+  const paid = slot({ feePence: 2500 });
+  assert.equal(canSwitchRoute(c, paid, "paid"), null);
+  assert.equal(canSwitchRoute({ ...c, status: "completed" }, paid, "paid"), null);
+  assert.equal(canSwitchRoute({ ...c, route: "paid" }, paid, "early_finish"), null);
+  assert.equal(canSwitchRoute(c, paid, "early_finish"), "same");
+  assert.equal(canSwitchRoute({ ...c, paidRunId: "2026-11" }, paid, "paid"), "paid_out");
+  assert.equal(canSwitchRoute({ ...c, route: "paid" }, slot({ feePence: 0 }), "early_finish"), "free");
+  assert.equal(canSwitchRoute({ ...c, freelancer: true }, paid, "paid"), "freelancer");
+  assert.equal(canSwitchRoute({ ...c, status: "withdrawn" }, paid, "paid"), "not_active");
 });
