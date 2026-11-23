@@ -94,6 +94,30 @@ test("database rules", { skip: !enabled && "set FIRESTORE_EMULATOR_HOST to run" 
     assert.equal((await store.getClaim(r.claim.id))?.paidRunId, "2026-11");
     assert.equal((await store.unpaidCompletedClaims()).length, 0);
     await assert.rejects(store.setClaimFlag(r.claim.id, true, "x", sam), /Already paid/);
+    await assert.rejects(store.switchClaimRoute(r.claim.id, "early_finish", sam), /Already sent to payroll/);
+  });
+
+  await t.test("admin switches Paid and Time instead; an unsent summary drops a shift that becomes Time instead", async () => {
+    const s = await store.createSlot({ ...base, date: "2026-11-20", startTime: "06:00", endTime: "06:30", leaveEarlyAt: "15:00" }, louis, now);
+    const r = await store.claimSlot(s.id, people[4], "early_finish", now);
+    assert.ok(r.ok && r.claim.amountPence === 0);
+    await assert.rejects(store.switchClaimRoute(r.claim.id, "paid", people[0]), /Only Sam or Jamie/);
+    await assert.rejects(store.switchClaimRoute(r.claim.id, "early_finish", sam), /already set/);
+    const up = await store.switchClaimRoute(r.claim.id, "paid", sam);
+    assert.equal(up.claim.amountPence, base.feePence);
+    assert.equal((await store.getClaim(r.claim.id))?.route, "paid");
+    await store.completeClaim(up.claim);
+    const run = await store.createPayRun("2026-12", [{ ...up.claim, status: "completed" }], now);
+    assert.equal(run?.totalPence, base.feePence);
+    const down = await store.switchClaimRoute(r.claim.id, "early_finish", sam);
+    assert.equal(down.claim.amountPence, 0);
+    const after = await store.getPayRun("2026-12");
+    assert.deepEqual(after?.claimIds, []);
+    assert.equal(after?.totalPence, 0);
+    const free = await store.createSlot({ ...base, date: "2026-11-21", feePence: 0 }, louis, now);
+    const f = await store.claimSlot(free.id, people[4], "paid", now);
+    assert.ok(f.ok);
+    await assert.rejects(store.switchClaimRoute(f.claim.id, "early_finish", sam), /free slot/);
   });
 
   await t.test("give away: offer, decline, offer again, accept swaps the claim without changing spaces", async () => {
@@ -175,7 +199,7 @@ test("database rules", { skip: !enabled && "set FIRESTORE_EMULATOR_HOST to run" 
   await t.test("every change is in the audit log", async () => {
     const snap = await db().collection("ot_audit").get();
     const actions = new Set(snap.docs.map((d) => d.data().action));
-    for (const a of ["slot.create", "claim.create", "claim.withdraw", "slot.edit", "slot.cancel", "claim.complete", "payrun.create", "payrun.approve", "payrun.sent", "claim.offer", "claim.offer_decline", "claim.swap", "claim.assign_freelancer", "claim.remove_freelancer"])
+    for (const a of ["slot.create", "claim.create", "claim.withdraw", "slot.edit", "slot.cancel", "claim.complete", "payrun.create", "payrun.approve", "payrun.sent", "claim.offer", "claim.offer_decline", "claim.swap", "claim.assign_freelancer", "claim.remove_freelancer", "claim.switch_route"])
       assert.ok(actions.has(a), a);
   });
 

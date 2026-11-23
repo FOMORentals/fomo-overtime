@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { homeView, offerMessage, payRunBlocks, readSlotForm, roundupMessage, routeModal, slotLine, slotMessage, slotModal } from "./views";
+import { homeView, offerMessage, payRunBlocks, readSlotForm, roundupMessage, routeModal, routeSwitchMessage, slotLine, slotMessage, slotModal } from "./views";
 import { inviteBody, teamEventBody } from "./calendar";
 import { slotInstants, londonToUtc } from "./time";
 import type { Claim, Slot } from "./types";
@@ -160,4 +160,15 @@ test("freelancer invite: guest is the freelancer, no fee shown, from the assigne
   assert.doesNotMatch(b.description, /£50/);
   assert.match(b.description, /Booked by Louis/);
   assert.equal(b.summary, "FOMO overtime: Early opening · Andrew Berekdar");
+});
+
+test("switch message says what it is now", () => {
+  const toPaid = routeSwitchMessage(s, { ...claim, route: "paid", amountPence: 5000 }, "Sam");
+  assert.match(toPaid, /Sam changed your overtime/);
+  assert.match(toPaid, /now \*paid\*: £50/);
+  assert.match(toPaid, /November 2026/);
+  const toTime = routeSwitchMessage(s, claim, "Jamie");
+  assert.match(toTime, /time instead/);
+  assert.match(toTime, /leave at 15:00/);
+  assert.doesNotMatch(routeSwitchMessage({ ...s, leaveEarlyAt: null }, claim, "Jamie"), /leave at/);
 });

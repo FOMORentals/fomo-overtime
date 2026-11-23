@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { FieldValue, type Transaction } from "firebase-admin/firestore";
 import { COL, db } from "./firestore";
-import { amountFor, canClaim, canOffer, offersEarlyFinish, spacesLeft, statusAfterCount, validateSlotInput, type ClaimRefusal, type OfferRefusal } from "./rules";
+import { amountFor, canClaim, canOffer, canSwitchRoute, offersEarlyFinish, spacesLeft, statusAfterCount, validateSlotInput, type ClaimRefusal, type OfferRefusal, type SwitchRefusal } from "./rules";
 import { slotInstants } from "./time";
 import { slotLabel } from "./labels";
 import type { Claim, PayRun, Route, Slot, SlotInput } from "./types";
@@ -495,6 +495,49 @@ export async function setClaimFlag(claimId: string, flagged: boolean, reason: st
     if ((snap.data() as Claim).paidRunId) throw new UserError("Already paid, so it can't be changed here.");
     tx.update(ref, { flagged, flagReason: flagged ? reason || "Flagged" : null });
     audit(tx, actor, flagged ? "claim.flag" : "claim.unflag", { claimId, reason });
+  });
+}
+
+const SWITCH_TEXT: Record<SwitchRefusal, string> = {
+  freelancer: "Freelancers invoice FOMO, so there's nothing to switch.",
+  free: "This is a free slot, so there's nothing to switch.",
+  not_active: "This shift was withdrawn or cancelled.",
+  paid_out: "Already sent to payroll, so it can't be changed.",
+  same: "It's already set that way.",
+};
+
+/**
+ * Admin: switch a shift between Paid (the slot's posted fee) and Time instead (£0) (Jamie, 23 Nov 2026).
+ * Locked once sent to payroll. If a month-end summary not yet sent includes it and it becomes Time instead,
+ * it is taken out of that summary. A shift switched to Paid after the summary was made goes in the next one.
+ */
+export async function switchClaimRoute(claimId: string, to: Route, actor: Actor): Promise<{ slot: Slot; claim: Claim }> {
+  if (!actor.admin) throw new UserError("Only Sam or Jamie can change this.");
+  return db().runTransaction(async (tx) => {
+    const ref = db().collection(COL.claims).doc(claimId);
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new UserError("Not found.");
+    const claim = { ...(snap.data() as Omit<Claim, "id">), id: claimId };
+    const slotSnap = await tx.get(db().collection(COL.slots).doc(claim.slotId));
+    if (!slotSnap.exists) throw new UserError("That slot no longer exists.");
+    const slot = { ...(slotSnap.data() as Omit<Slot, "id">), id: claim.slotId };
+    const refusal = canSwitchRoute(claim, slot, to);
+    if (refusal) throw new UserError(SWITCH_TEXT[refusal]);
+    const runs = await tx.get(db().collection(COL.payRuns).where("claimIds", "array-contains", claimId));
+    const fields = { route: to, amountPence: amountFor(slot, to) };
+    tx.update(ref, fields);
+    const fromRuns: string[] = [];
+    for (const r of runs.docs) {
+      const run = r.data() as PayRun;
+      if (run.status === "sent" || to !== "early_finish") continue;
+      tx.update(r.ref, { claimIds: FieldValue.arrayRemove(claimId), totalPence: run.totalPence - claim.amountPence });
+      fromRuns.push(r.id);
+    }
+    audit(tx, actor, "claim.switch_route", {
+      claimId, slotId: slot.id, from: claim.route, to, amountBefore: claim.amountPence, amountPence: fields.amountPence,
+      ...(fromRuns.length ? { removedFromPayRuns: fromRuns } : {}),
+    });
+    return { slot, claim: { ...claim, ...fields } };
   });
 }
 

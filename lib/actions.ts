@@ -11,7 +11,7 @@ import { dm, dmEmail, overtimeChannel, slack } from "./slack";
 import { OPS_ALERT_EMAIL, staffByEmail } from "./staff";
 import { claimsForSlot, claimsForUser, getSlot, liveSlots, updateClaimFields, updateSlotFields, type Actor } from "./store";
 import type { Claim, Slot } from "./types";
-import { claimConfirmation, homeView, slotLine, slotMessage } from "./views";
+import { claimConfirmation, homeView, routeSwitchMessage, slotLine, slotMessage } from "./views";
 
 export async function postSlotToChannel(slot: Slot): Promise<Slot> {
   const msg = slotMessage(slot, [], appUrl());
@@ -133,6 +133,13 @@ export async function afterCancel(slot: Slot, claims: Claim[], actor: Actor) {
     await safe("dm.slot_cancelled", () => dm(c.userId, `:x: ${actor.name} cancelled *${slotLine(slot)}*. It's been taken off your calendar, and nothing is owed for it.`));
     await safe("home.publish", () => publishHome(c.userId));
   }
+}
+
+/** An admin switched a shift between Paid and Time instead: calendar, post, Home tab and a DM to the person. */
+export async function afterRouteSwitch(slot: Slot, claim: Claim, actor: Actor) {
+  await Promise.all([syncCalendar(slot, claim), refreshSlot(slot.id)]);
+  await safe("dm.route_switched", () => dm(claim.userId, routeSwitchMessage(slot, claim, actor.name)));
+  await safe("home.publish", () => publishHome(claim.userId));
 }
 
 /** Freelancer invite: Google emails it from the assigner's calendar. A failure is reported and the assigner told. */
