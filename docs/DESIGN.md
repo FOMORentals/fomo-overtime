@@ -2,6 +2,18 @@
 
 Agreed with Jamie in a grill-me interview on Sam's "Overtime Tracker: Project Brief". Sam's pain points: overtime posted but never claimed; claimed but forgotten; adding up earnings is laborious.
 
+## App card
+Approved by Jamie, 24 Nov 2026. #app-requests uses this card to tell which app a request belongs to; a request
+for something under "Must never" goes against Jamie's decision, so it goes to Jamie as a proposal. Change it
+only with Jamie's OK, in the same pull request as the change.
+
+- **What it's for:** Overtime slots in #rentals_overtime: post, claim, give away; the admin page and CSV.
+- **Who uses it:** The whole team; admins Sam and Jamie.
+- **Must never:** Change what anyone is paid; let someone claim a slot for someone else.
+- **Belongs elsewhere:** Rotas and holidays (not an app yet).
+
+## Design
+
 **Where it lives.** Slack (#rentals_overtime), because that's where the team already works. A small web page (`/admin`) is only for Sam and Jamie: monthly view, flagging, CSV. They open it from a signed link in the Slack app (no separate login).
 
 **Who.** Sam, Louis, Rosie, Will, Margarita, plus Jamie. Admins: Sam and Jamie. Matched by fomorentals.co.uk email (`lib/staff.ts`).
